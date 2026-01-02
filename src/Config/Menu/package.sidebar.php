@@ -1,0 +1,36 @@
+<?php
+
+return [
+    'manager-core' => [
+        'name'          => 'Manager Core',
+        'icon'          => 'fas fa-calculator',
+        'route_segment' => 'manager-core',
+        'permission'    => 'manager-core.view',
+        'entries'       => [
+            [
+                'name'       => 'Appraisal',
+                'icon'       => 'fas fa-coins',
+                'route'      => 'manager-core.appraisal.index',
+                'permission' => 'manager-core.appraisal',
+            ],
+            [
+                'name'       => 'Market Prices',
+                'icon'       => 'fas fa-chart-line',
+                'route'      => 'manager-core.pricing.index',
+                'permission' => 'manager-core.pricing.view',
+            ],
+            [
+                'name'       => 'Plugin Bridge',
+                'icon'       => 'fas fa-plug',
+                'route'      => 'manager-core.bridge.index',
+                'permission' => 'manager-core.bridge.view',
+            ],
+            [
+                'name'       => 'Settings',
+                'icon'       => 'fas fa-cogs',
+                'route'      => 'manager-core.settings',
+                'permission' => 'global.superuser',
+            ],
+        ],
+    ],
+];
