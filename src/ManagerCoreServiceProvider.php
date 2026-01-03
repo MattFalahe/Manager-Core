@@ -33,6 +33,8 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
                 UpdateMarketPricesCommand::class,
                 CleanupOldPricesCommand::class,
                 DiagnosePluginBridgeCommand::class,
+                \ManagerCore\Console\Commands\DiagnoseCommand::class,
+                \ManagerCore\Console\Commands\DiagnoseESICommand::class,
             ]);
         }
 
