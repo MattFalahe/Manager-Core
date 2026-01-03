@@ -96,14 +96,19 @@ class PluginBridge
      */
     protected function updateRegistry($pluginName, $providerClass)
     {
-        PluginRegistry::updateOrCreate(
-            ['plugin_name' => $pluginName],
-            [
-                'plugin_class' => $providerClass,
-                'is_active' => true,
-                'last_seen_at' => now(),
-            ]
-        );
+        try {
+            PluginRegistry::updateOrCreate(
+                ['plugin_name' => $pluginName],
+                [
+                    'plugin_class' => $providerClass,
+                    'is_active' => true,
+                    'last_seen_at' => now(),
+                ]
+            );
+        } catch (\Exception $e) {
+            // Gracefully handle missing tables during installation/migration
+            Log::warning("[Manager Core] Could not update plugin registry for {$pluginName}: " . $e->getMessage());
+        }
     }
 
     /**
