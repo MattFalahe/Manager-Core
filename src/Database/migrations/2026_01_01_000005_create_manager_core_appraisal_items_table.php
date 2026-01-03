@@ -17,7 +17,7 @@ class CreateManagerCoreAppraisalItemsTable extends Migration
             Schema::create('manager_core_appraisal_items', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('appraisal_id')->constrained('manager_core_appraisals')->onDelete('cascade');
-                $table->integer('type_id')->index();
+                $table->integer('type_id');
                 $table->string('type_name', 255)->nullable();
                 $table->bigInteger('quantity')->default(0);
 
