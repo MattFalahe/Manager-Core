@@ -15,6 +15,19 @@ Route::group([
         'middleware' => 'can:manager-core.view',
     ]);
 
+    Route::get('/dashboard', [
+        'as'   => 'manager-core.dashboard',
+        'uses' => 'DashboardController@index',
+        'middleware' => 'can:manager-core.view',
+    ]);
+
+    // Help & Documentation
+    Route::get('/help', [
+        'as'   => 'manager-core.help',
+        'uses' => 'HelpController@index',
+        'middleware' => 'can:manager-core.view',
+    ]);
+
     // Appraisal Routes
     Route::group(['prefix' => 'appraisal'], function () {
         Route::get('/', [

@@ -55,10 +55,10 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach($markets as $key => $name)
+                            @foreach($markets as $key => $market)
                             <tr>
                                 <td><strong>{{ strtoupper($key) }}</strong></td>
-                                <td>{{ $name }}</td>
+                                <td>{{ $market['name'] }}</td>
                                 <td>
                                     @php
                                         $sub = $subscriptions->firstWhere('market', $key);

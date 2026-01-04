@@ -4,8 +4,9 @@ return [
     'dashboard' => 'Manager Core Dashboard',
     'appraisal' => 'Appraisal',
     'pricing' => 'Market Pricing',
-    'bridge' => 'Plugin Bridge',
+    'plugin_bridge' => 'Plugin Bridge',
     'settings' => 'Settings',
+    'help' => 'Help & Documentation',
 
     // Appraisal
     'create_appraisal' => 'Create Appraisal',

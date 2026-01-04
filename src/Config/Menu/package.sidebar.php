@@ -26,6 +26,12 @@ return [
                 'permission' => 'manager-core.bridge.view',
             ],
             [
+                'name'       => 'Help & Documentation',
+                'icon'       => 'fas fa-question-circle',
+                'route'      => 'manager-core.help',
+                'permission' => 'manager-core.view',
+            ],
+            [
                 'name'       => 'Settings',
                 'icon'       => 'fas fa-cogs',
                 'route'      => 'manager-core.settings',

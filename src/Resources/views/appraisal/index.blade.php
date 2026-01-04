@@ -17,8 +17,8 @@
                         <label for="market">Market</label>
                         <select class="form-control" id="market" name="market" required>
                             <option value="">Select Market</option>
-                            @foreach($markets as $key => $name)
-                                <option value="{{ $key }}">{{ $name }}</option>
+                            @foreach($markets as $key => $market)
+                                <option value="{{ $key }}">{{ $market['name'] }}</option>
                             @endforeach
                         </select>
                     </div>

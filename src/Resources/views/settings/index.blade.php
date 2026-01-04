@@ -27,10 +27,10 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach($config['pricing']['markets'] ?? [] as $key => $name)
+                                    @foreach($config['pricing']['markets'] ?? [] as $key => $market)
                                     <tr>
                                         <td><code>{{ $key }}</code></td>
-                                        <td>{{ $name }}</td>
+                                        <td>{{ $market['name'] }}</td>
                                         <td><span class="badge badge-success">Enabled</span></td>
                                     </tr>
                                     @endforeach
