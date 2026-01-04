@@ -13,23 +13,59 @@
             <div class="card-body">
                 <form method="POST" action="{{ route('manager-core.appraisal.create') }}">
                     @csrf
-                    <div class="form-group">
-                        <label for="market">Market</label>
-                        <select class="form-control" id="market" name="market" required>
-                            <option value="">Select Market</option>
-                            @foreach($markets as $key => $market)
-                                <option value="{{ $key }}">{{ $market['name'] }}</option>
-                            @endforeach
-                        </select>
-                    </div>
+
                     <div class="form-group">
                         <label for="raw_input">Items (paste from game)</label>
-                        <textarea class="form-control" id="raw_input" name="raw_input" rows="10" required placeholder="Paste your items here..."></textarea>
+                        <textarea class="form-control" id="raw_input" name="raw_input" rows="10" required
+                                  placeholder="Paste your items here...&#10;&#10;Supports: Inventory, Cargo Scan, Contract Items, and more"></textarea>
                         <small class="form-text text-muted">
-                            Paste items from EVE Online inventory or contract. Supports standard EVE formats.
+                            Press <kbd>Ctrl+A</kbd> in EVE, then <kbd>Ctrl+C</kbd> to copy. Paste here with <kbd>Ctrl+V</kbd>
                         </small>
                     </div>
-                    <button type="submit" class="btn btn-primary">
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="market">Market</label>
+                                <select class="form-control" id="market" name="market" required>
+                                    <option value="">Select Market</option>
+                                    @foreach($markets as $key => $market)
+                                        <option value="{{ $key }}" {{ $key == 'jita' ? 'selected' : '' }}>
+                                            {{ $market['name'] }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                                <small class="form-text text-muted">Choose which market to use for pricing</small>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="price_percentage">Price Percentage</label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="price_percentage"
+                                           name="price_percentage" value="100" min="1" max="200" step="1">
+                                    <div class="input-group-append">
+                                        <span class="input-group-text">%</span>
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">
+                                    100% = market price, 90% = quick sale, 110% = markup
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" class="custom-control-input" id="is_private" name="is_private" value="1">
+                            <label class="custom-control-label" for="is_private">
+                                Make this appraisal private (only you can view it)
+                            </label>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-lg">
                         <i class="fas fa-calculator"></i> Create Appraisal
                     </button>
                 </form>
