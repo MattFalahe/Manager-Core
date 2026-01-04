@@ -17,7 +17,7 @@ class CreateManagerCoreAppraisalsTable extends Migration
             Schema::create('manager_core_appraisals', function (Blueprint $table) {
                 $table->id();
                 $table->string('appraisal_id', 20)->unique(); // Short code like "ABC123"
-                $table->integer('user_id')->nullable()->index();
+                $table->integer('user_id')->nullable();
                 $table->string('market', 50)->default('jita');
                 $table->string('kind', 50)->nullable(); // cargo, listing, etc.
 
@@ -42,9 +42,9 @@ class CreateManagerCoreAppraisalsTable extends Migration
                 $table->softDeletes();
 
                 // Indexes
+                $table->index('user_id');
                 $table->index('created_at');
                 $table->index(['market', 'created_at']);
-                $table->index('user_id');
             });
         }
     }
