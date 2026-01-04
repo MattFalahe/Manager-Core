@@ -6,6 +6,7 @@ use Seat\Services\AbstractSeatPlugin;
 use ManagerCore\Console\Commands\UpdateMarketPricesCommand;
 use ManagerCore\Console\Commands\CleanupOldPricesCommand;
 use ManagerCore\Console\Commands\DiagnosePluginBridgeCommand;
+use ManagerCore\Console\Commands\DiagnoseBridgeCommand;
 use ManagerCore\Database\Seeders\ScheduleSeeder;
 
 class ManagerCoreServiceProvider extends AbstractSeatPlugin
@@ -33,6 +34,7 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
                 UpdateMarketPricesCommand::class,
                 CleanupOldPricesCommand::class,
                 DiagnosePluginBridgeCommand::class,
+                DiagnoseBridgeCommand::class,
                 \ManagerCore\Console\Commands\DiagnoseCommand::class,
                 \ManagerCore\Console\Commands\DiagnoseESICommand::class,
             ]);

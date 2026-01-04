@@ -23,8 +23,8 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="raw_data">Items (paste from game)</label>
-                        <textarea class="form-control" id="raw_data" name="raw_data" rows="10" required placeholder="Paste your items here..."></textarea>
+                        <label for="raw_input">Items (paste from game)</label>
+                        <textarea class="form-control" id="raw_input" name="raw_input" rows="10" required placeholder="Paste your items here..."></textarea>
                         <small class="form-text text-muted">
                             Paste items from EVE Online inventory or contract. Supports standard EVE formats.
                         </small>

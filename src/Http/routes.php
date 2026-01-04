@@ -102,4 +102,28 @@ Route::group([
         'uses' => 'SettingsController@save',
         'middleware' => 'can:global.superuser',
     ]);
+
+    Route::post('/settings/market/{id}/toggle', [
+        'as'   => 'manager-core.settings.market.toggle',
+        'uses' => 'SettingsController@toggleMarket',
+        'middleware' => 'can:global.superuser',
+    ]);
+
+    Route::get('/settings/market/add', [
+        'as'   => 'manager-core.settings.market.add',
+        'uses' => 'SettingsController@addMarket',
+        'middleware' => 'can:global.superuser',
+    ]);
+
+    Route::post('/settings/market', [
+        'as'   => 'manager-core.settings.market.store',
+        'uses' => 'SettingsController@storeMarket',
+        'middleware' => 'can:global.superuser',
+    ]);
+
+    Route::delete('/settings/market/{id}', [
+        'as'   => 'manager-core.settings.market.delete',
+        'uses' => 'SettingsController@deleteMarket',
+        'middleware' => 'can:global.superuser',
+    ]);
 });
