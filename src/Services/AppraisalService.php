@@ -102,6 +102,9 @@ class AppraisalService
             $appraisal->save();
             Log::info("[Manager Core] Saved appraisal record", ['appraisal_id' => $appraisal->appraisal_id]);
 
+            // Auto-subscribe to these type IDs for future price updates
+            $this->subscribeToTypes($items, $market);
+
             // Create appraisal items and calculate totals
             $this->populateAppraisalItems($appraisal, $items);
 
@@ -317,6 +320,33 @@ class AppraisalService
         }
 
         return $appraisal->load('items');
+    }
+
+    /**
+     * Subscribe to types for automatic price updates
+     *
+     * @param array $items
+     * @param string $market
+     * @return void
+     */
+    protected function subscribeToTypes(array $items, string $market)
+    {
+        $typeIds = array_column($items, 'type_id');
+
+        if (empty($typeIds)) {
+            return;
+        }
+
+        try {
+            $this->pricing->registerTypes('appraisal', $typeIds, $market, 5);
+            Log::info("[Manager Core] Auto-subscribed to " . count($typeIds) . " types for market: {$market}");
+        } catch (\Exception $e) {
+            Log::warning("[Manager Core] Failed to auto-subscribe types", [
+                'error' => $e->getMessage(),
+                'type_ids' => $typeIds,
+                'market' => $market
+            ]);
+        }
     }
 
     /**

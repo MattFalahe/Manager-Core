@@ -4,6 +4,7 @@ return [
     'dashboard' => 'Manager Core Dashboard',
     'appraisal' => 'Appraisal',
     'pricing' => 'Market Pricing',
+    'type_subscriptions' => 'Type Subscriptions',
     'plugin_bridge' => 'Plugin Bridge',
     'settings' => 'Settings',
     'help' => 'Help & Documentation',

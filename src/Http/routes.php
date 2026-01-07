@@ -126,4 +126,56 @@ Route::group([
         'uses' => 'SettingsController@deleteMarket',
         'middleware' => 'can:global.superuser',
     ]);
+
+    // Type Subscription Routes
+    Route::group(['prefix' => 'subscriptions'], function () {
+        Route::get('/', [
+            'as'   => 'manager-core.subscriptions.index',
+            'uses' => 'SubscriptionController@index',
+            'middleware' => 'can:manager-core.pricing.manage',
+        ]);
+
+        Route::post('/subscribe-types', [
+            'as'   => 'manager-core.subscriptions.subscribe-types',
+            'uses' => 'SubscriptionController@subscribeTypes',
+            'middleware' => 'can:manager-core.pricing.manage',
+        ]);
+
+        Route::post('/subscribe-category', [
+            'as'   => 'manager-core.subscriptions.subscribe-category',
+            'uses' => 'SubscriptionController@subscribeCategory',
+            'middleware' => 'can:manager-core.pricing.manage',
+        ]);
+
+        Route::post('/subscribe-group', [
+            'as'   => 'manager-core.subscriptions.subscribe-group',
+            'uses' => 'SubscriptionController@subscribeGroup',
+            'middleware' => 'can:manager-core.pricing.manage',
+        ]);
+
+        Route::delete('/{id}', [
+            'as'   => 'manager-core.subscriptions.unsubscribe',
+            'uses' => 'SubscriptionController@unsubscribe',
+            'middleware' => 'can:manager-core.pricing.manage',
+        ]);
+
+        Route::delete('/plugin/clear', [
+            'as'   => 'manager-core.subscriptions.clear-plugin',
+            'uses' => 'SubscriptionController@clearPlugin',
+            'middleware' => 'can:manager-core.pricing.manage',
+        ]);
+
+        // AJAX Routes
+        Route::get('/categories', [
+            'as'   => 'manager-core.subscriptions.categories',
+            'uses' => 'SubscriptionController@getCategories',
+            'middleware' => 'can:manager-core.pricing.manage',
+        ]);
+
+        Route::get('/groups/{categoryId}', [
+            'as'   => 'manager-core.subscriptions.groups',
+            'uses' => 'SubscriptionController@getGroups',
+            'middleware' => 'can:manager-core.pricing.manage',
+        ]);
+    });
 });

@@ -34,4 +34,14 @@ class TypeSubscription extends Model
         'type_id' => 'integer',
         'priority' => 'integer',
     ];
+
+    /**
+     * Get the EVE type information
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function type()
+    {
+        return $this->belongsTo(\Seat\Eveapi\Models\Sde\InvType::class, 'type_id', 'typeID');
+    }
 }
