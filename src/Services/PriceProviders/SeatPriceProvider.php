@@ -75,13 +75,18 @@ class SeatPriceProvider implements PriceProviderInterface
         try {
             // Get the default price provider backend
             $helper = app('RecursiveTree\Seat\PricesCore\Utils\PriceProviderHelper');
-            $providerName = config('prices-core.default');
+
+            // Use Manager Core's selected provider, or fall back to SeAT's default
+            $providerName = \ManagerCore\Models\Setting::get('pricing.seat_provider')
+                          ?? config('manager-core.pricing.seat_provider')
+                          ?? config('prices-core.default');
 
             if (!$providerName) {
-                Log::warning("[Manager Core] No default price provider configured in SeAT");
+                Log::warning("[Manager Core] No price provider configured in Manager Core or SeAT");
                 return null;
             }
 
+            Log::info("[Manager Core] Using SeAT price provider: {$providerName}");
             return $helper->getProvider($providerName);
 
         } catch (\Exception $e) {
@@ -98,7 +103,10 @@ class SeatPriceProvider implements PriceProviderInterface
      */
     protected function getPriceProviderConfiguration(string $market): array
     {
-        $providerName = config('prices-core.default');
+        // Use Manager Core's selected provider, or fall back to SeAT's default
+        $providerName = \ManagerCore\Models\Setting::get('pricing.seat_provider')
+                      ?? config('manager-core.pricing.seat_provider')
+                      ?? config('prices-core.default');
 
         if (!$providerName) {
             return [];
@@ -184,9 +192,32 @@ class SeatPriceProvider implements PriceProviderInterface
             return false;
         }
 
-        // Check if a provider is configured
-        $provider = config('prices-core.default');
+        // Check if a provider is configured (either in Manager Core or SeAT)
+        $provider = \ManagerCore\Models\Setting::get('pricing.seat_provider')
+                  ?? config('manager-core.pricing.seat_provider')
+                  ?? config('prices-core.default');
 
         return $provider !== null;
+    }
+
+    /**
+     * Get list of available SeAT price providers
+     *
+     * @return array Array of provider names
+     */
+    public static function getAvailableProviders(): array
+    {
+        // Check if prices-core is installed
+        if (!class_exists('RecursiveTree\Seat\PricesCore\Utils\PriceProviderHelper')) {
+            return [];
+        }
+
+        try {
+            $providers = config('prices-core.providers', []);
+            return array_keys($providers);
+        } catch (\Exception $e) {
+            Log::error("[Manager Core] Failed to get available providers: " . $e->getMessage());
+            return [];
+        }
     }
 }

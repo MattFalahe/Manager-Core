@@ -20,6 +20,12 @@ return [
                 'permission' => 'manager-core.pricing.view',
             ],
             [
+                'name'       => 'Type Subscriptions',
+                'icon'       => 'fas fa-rss',
+                'route'      => 'manager-core.subscriptions.index',
+                'permission' => 'manager-core.pricing.manage',
+            ],
+            [
                 'name'       => 'Plugin Bridge',
                 'icon'       => 'fas fa-plug',
                 'route'      => 'manager-core.bridge.index',

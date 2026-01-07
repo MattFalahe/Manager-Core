@@ -20,6 +20,7 @@ class SettingsController extends Controller
 
         $settings = [
             'price_provider' => Setting::get('pricing.provider', 'esi'),
+            'seat_price_provider' => Setting::get('pricing.seat_provider', ''),
             'cache_ttl' => Setting::get('pricing.cache_ttl', 3600),
             'default_market' => Setting::get('pricing.default_market', 'jita'),
             'retention_days' => Setting::get('appraisal.retention_days', 90),
@@ -27,7 +28,10 @@ class SettingsController extends Controller
             'update_frequency' => Setting::get('pricing.update_frequency', 240),
         ];
 
-        return view('manager-core::settings.index', compact('markets', 'settings'));
+        // Get available SeAT price providers
+        $availableProviders = \ManagerCore\Services\PriceProviders\SeatPriceProvider::getAvailableProviders();
+
+        return view('manager-core::settings.index', compact('markets', 'settings', 'availableProviders'));
     }
 
     /**
@@ -40,6 +44,7 @@ class SettingsController extends Controller
     {
         $request->validate([
             'price_provider' => 'required|string|in:esi,seat',
+            'seat_price_provider' => 'nullable|string',
             'cache_ttl' => 'required|integer|min:60|max:86400',
             'default_market' => 'required|string',
             'retention_days' => 'required|integer|min:0|max:3650',
@@ -48,6 +53,7 @@ class SettingsController extends Controller
         ]);
 
         Setting::set('pricing.provider', $request->input('price_provider'), 'pricing');
+        Setting::set('pricing.seat_provider', $request->input('seat_price_provider', ''), 'pricing');
         Setting::set('pricing.cache_ttl', (int) $request->input('cache_ttl'), 'pricing');
         Setting::set('pricing.default_market', $request->input('default_market'), 'pricing');
         Setting::set('appraisal.retention_days', (int) $request->input('retention_days'), 'appraisal');

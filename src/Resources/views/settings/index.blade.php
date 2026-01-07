@@ -52,6 +52,32 @@
                         @enderror
                     </div>
 
+                    <div class="form-group" id="seat_provider_group" style="display: none;">
+                        <label for="seat_price_provider">SeAT Price Provider</label>
+                        <select class="form-control @error('seat_price_provider') is-invalid @enderror"
+                                id="seat_price_provider" name="seat_price_provider">
+                            <option value="">Use SeAT Default Provider</option>
+                            @if(count($availableProviders) > 0)
+                                @foreach($availableProviders as $provider)
+                                <option value="{{ $provider }}" {{ old('seat_price_provider', $settings['seat_price_provider'] ?? '') == $provider ? 'selected' : '' }}>
+                                    {{ ucfirst($provider) }}
+                                </option>
+                                @endforeach
+                            @else
+                                <option value="" disabled>No providers found - install seat-prices-core plugins</option>
+                            @endif
+                        </select>
+                        <small class="form-text text-muted">
+                            Select which SeAT price provider to use. Leave empty to use SeAT's default.
+                            @if(count($availableProviders) == 0)
+                                <br><strong class="text-warning">Warning:</strong> No price providers detected. Install seat-prices-core plugins like seat-prices-evepraisal or seat-prices-fuzzwork.
+                            @endif
+                        </small>
+                        @error('seat_price_provider')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-group">
@@ -253,4 +279,28 @@
         </div>
     </div>
 </div>
+
+@push('javascript')
+<script>
+    $(document).ready(function() {
+        // Show/hide SeAT provider dropdown based on price provider selection
+        function toggleSeatProviderField() {
+            var priceProvider = $('#price_provider').val();
+            if (priceProvider === 'seat') {
+                $('#seat_provider_group').slideDown();
+            } else {
+                $('#seat_provider_group').slideUp();
+            }
+        }
+
+        // Initial state
+        toggleSeatProviderField();
+
+        // On change
+        $('#price_provider').on('change', function() {
+            toggleSeatProviderField();
+        });
+    });
+</script>
+@endpush
 @endsection
