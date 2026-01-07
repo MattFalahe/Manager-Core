@@ -52,50 +52,15 @@ class MarketDataService
         $regionId = $marketConfig['region_id'];
         $systemIds = $marketConfig['system_ids'] ?? [];
 
-        Log::info("[Manager Core] Fetching market orders for region {$regionId} ({$market})");
+        Log::info("[Manager Core] Fetching market orders for region {$regionId} ({$market}) - " . count($typeIds) . " types");
 
-        // Fetch all orders for the region (paginated)
-        $allOrders = $this->fetchRegionOrders($regionId);
+        // Initialize storage for orders by type
+        $ordersByType = array_fill_keys($typeIds, []);
+        $processedTypes = [];
 
-        if (empty($allOrders)) {
-            Log::warning("[Manager Core] No orders fetched for region {$regionId}");
-            return;
-        }
-
-        // Filter orders by system IDs if specified
-        if (!empty($systemIds)) {
-            $allOrders = array_filter($allOrders, function ($order) use ($systemIds) {
-                return in_array($order['system_id'] ?? 0, $systemIds);
-            });
-        }
-
-        // Group orders by type_id
-        $ordersByType = [];
-        foreach ($allOrders as $order) {
-            $typeId = $order['type_id'];
-            if (in_array($typeId, $typeIds)) {
-                $ordersByType[$typeId][] = $order;
-            }
-        }
-
-        // Calculate and save price statistics for each type
-        foreach ($ordersByType as $typeId => $orders) {
-            $this->calculateAndSavePrices($typeId, $orders, $market);
-        }
-
-        Log::info("[Manager Core] Updated prices for " . count($ordersByType) . " types in {$market}");
-    }
-
-    /**
-     * Fetch all market orders for a region (with pagination)
-     *
-     * @param int $regionId
-     * @return array
-     */
-    protected function fetchRegionOrders($regionId)
-    {
-        $allOrders = [];
+        // Fetch orders page by page to avoid memory exhaustion
         $page = 1;
+        $totalPages = null;
 
         do {
             $url = "{$this->baseUrl}/markets/{$regionId}/orders/?datasource=tranquility&order_type=all&page={$page}";
@@ -114,13 +79,41 @@ class MarketDataService
                     break;
                 }
 
-                $allOrders = array_merge($allOrders, $orders);
+                // Process this page's orders immediately to save memory
+                foreach ($orders as $order) {
+                    $typeId = $order['type_id'];
+
+                    // Only process if this is a type we care about
+                    if (!in_array($typeId, $typeIds)) {
+                        continue;
+                    }
+
+                    // Filter by system if specified
+                    if (!empty($systemIds) && !in_array($order['system_id'] ?? 0, $systemIds)) {
+                        continue;
+                    }
+
+                    $ordersByType[$typeId][] = $order;
+                    $processedTypes[$typeId] = true;
+                }
+
+                // Free memory
+                unset($orders);
+
+                // Check if there are more pages
+                if ($totalPages === null) {
+                    $totalPages = (int) $response->header('X-Pages', 1);
+                }
+
                 $page++;
 
-                // Check if there are more pages (ESI returns X-Pages header)
-                $totalPages = $response->header('X-Pages');
-                if ($totalPages && $page > $totalPages) {
+                if ($page > $totalPages) {
                     break;
+                }
+
+                // Log progress every 10 pages
+                if ($page % 10 === 0) {
+                    Log::info("[Manager Core] Processed {$page}/{$totalPages} pages, found data for " . count($processedTypes) . " types");
                 }
 
             } catch (\Exception $e) {
@@ -130,7 +123,16 @@ class MarketDataService
 
         } while (true);
 
-        return $allOrders;
+        // Calculate and save price statistics for each type
+        $updatedCount = 0;
+        foreach ($ordersByType as $typeId => $orders) {
+            if (!empty($orders)) {
+                $this->calculateAndSavePrices($typeId, $orders, $market);
+                $updatedCount++;
+            }
+        }
+
+        Log::info("[Manager Core] Updated prices for {$updatedCount} types in {$market} (processed {$page} pages)");
     }
 
     /**
