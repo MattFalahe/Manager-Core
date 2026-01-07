@@ -21,10 +21,13 @@ class CreateManagerCorePriceHistoryTable extends Migration
                 $table->date('date')->index();
 
                 // Daily price statistics
-                $table->decimal('average_price', 20, 2)->default(0);
-                $table->decimal('highest_price', 20, 2)->default(0);
-                $table->decimal('lowest_price', 20, 2)->default(0);
-                $table->bigInteger('volume')->default(0);
+                $table->decimal('avg_buy', 20, 4)->default(0);
+                $table->decimal('avg_sell', 20, 4)->default(0);
+                $table->decimal('max_buy', 20, 4)->default(0);
+                $table->decimal('min_sell', 20, 4)->default(0);
+                $table->bigInteger('total_volume')->default(0);
+
+                $table->timestamps();
 
                 // Unique constraint - one record per type/market/date
                 $table->unique(['type_id', 'market', 'date']);
