@@ -54,85 +54,71 @@ class MarketDataService
 
         Log::info("[Manager Core] Fetching market orders for region {$regionId} ({$market}) - " . count($typeIds) . " types");
 
-        // Initialize storage for orders by type
-        $ordersByType = array_fill_keys($typeIds, []);
-        $processedTypes = [];
+        $updatedCount = 0;
+        $totalTypes = count($typeIds);
 
-        // Fetch orders page by page to avoid memory exhaustion
-        $page = 1;
-        $totalPages = null;
+        // Fetch orders for each type ID individually (much faster than region-wide scan)
+        foreach ($typeIds as $index => $typeId) {
+            $typeOrders = [];
+            $page = 1;
 
-        do {
-            $url = "{$this->baseUrl}/markets/{$regionId}/orders/?datasource=tranquility&order_type=all&page={$page}";
+            // Fetch all pages for this specific type
+            do {
+                $url = "{$this->baseUrl}/markets/{$regionId}/orders/?datasource=tranquility&order_type=all&type_id={$typeId}&page={$page}";
 
-            try {
-                $response = Http::timeout($this->timeout)->get($url);
+                try {
+                    $response = Http::timeout($this->timeout)->get($url);
 
-                if (!$response->successful()) {
-                    Log::error("[Manager Core] ESI request failed: {$url} - Status: {$response->status()}");
-                    break;
-                }
+                    if (!$response->successful()) {
+                        if ($response->status() === 404) {
+                            // No orders for this type, skip
+                            break;
+                        }
+                        Log::error("[Manager Core] ESI request failed for type {$typeId}: {$url} - Status: {$response->status()}");
+                        break;
+                    }
 
-                $orders = $response->json();
+                    $orders = $response->json();
 
-                if (empty($orders)) {
-                    break;
-                }
-
-                // Process this page's orders immediately to save memory
-                foreach ($orders as $order) {
-                    $typeId = $order['type_id'];
-
-                    // Only process if this is a type we care about
-                    if (!in_array($typeId, $typeIds)) {
-                        continue;
+                    if (empty($orders)) {
+                        break;
                     }
 
                     // Filter by system if specified
-                    if (!empty($systemIds) && !in_array($order['system_id'] ?? 0, $systemIds)) {
-                        continue;
+                    foreach ($orders as $order) {
+                        if (empty($systemIds) || in_array($order['system_id'] ?? 0, $systemIds)) {
+                            $typeOrders[] = $order;
+                        }
                     }
 
-                    $ordersByType[$typeId][] = $order;
-                    $processedTypes[$typeId] = true;
-                }
-
-                // Free memory
-                unset($orders);
-
-                // Check if there are more pages
-                if ($totalPages === null) {
+                    // Check if there are more pages
                     $totalPages = (int) $response->header('X-Pages', 1);
-                }
+                    $page++;
 
-                $page++;
+                    if ($page > $totalPages) {
+                        break;
+                    }
 
-                if ($page > $totalPages) {
+                } catch (\Exception $e) {
+                    Log::error("[Manager Core] Error fetching orders for type {$typeId}: " . $e->getMessage());
                     break;
                 }
 
-                // Log progress every 10 pages
-                if ($page % 10 === 0) {
-                    Log::info("[Manager Core] Processed {$page}/{$totalPages} pages, found data for " . count($processedTypes) . " types");
-                }
+            } while (true);
 
-            } catch (\Exception $e) {
-                Log::error("[Manager Core] Error fetching orders: " . $e->getMessage());
-                break;
+            // Calculate and save prices for this type
+            if (!empty($typeOrders)) {
+                $this->calculateAndSavePrices($typeId, $typeOrders, $market);
+                $updatedCount++;
             }
 
-        } while (true);
-
-        // Calculate and save price statistics for each type
-        $updatedCount = 0;
-        foreach ($ordersByType as $typeId => $orders) {
-            if (!empty($orders)) {
-                $this->calculateAndSavePrices($typeId, $orders, $market);
-                $updatedCount++;
+            // Log progress every 10 types
+            if (($index + 1) % 10 === 0) {
+                Log::info("[Manager Core] Processed " . ($index + 1) . "/{$totalTypes} types, updated {$updatedCount} with prices");
             }
         }
 
-        Log::info("[Manager Core] Updated prices for {$updatedCount} types in {$market} (processed {$page} pages)");
+        Log::info("[Manager Core] Updated prices for {$updatedCount}/{$totalTypes} types in {$market}");
     }
 
     /**
