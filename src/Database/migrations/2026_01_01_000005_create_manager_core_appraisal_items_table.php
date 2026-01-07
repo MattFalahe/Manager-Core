@@ -21,13 +21,21 @@ class CreateManagerCoreAppraisalItemsTable extends Migration
                 $table->string('type_name', 255)->nullable();
                 $table->bigInteger('quantity')->default(0);
 
-                // Pricing
-                $table->decimal('unit_price', 20, 2)->default(0);
-                $table->decimal('total_price', 20, 2)->default(0);
+                // Volume data
+                $table->decimal('type_volume', 20, 4)->default(0);
+                $table->decimal('total_volume', 20, 4)->default(0);
 
-                // Metadata
-                $table->boolean('price_available')->default(true);
-                $table->json('metadata')->nullable();
+                // Pricing data (stored as JSON)
+                $table->json('prices')->nullable();
+
+                // Item metadata
+                $table->boolean('is_fitted')->default(false);
+                $table->boolean('is_bpc')->default(false);
+                $table->integer('bpc_runs')->nullable();
+                $table->string('location', 255)->nullable();
+                $table->json('extra_data')->nullable();
+
+                $table->timestamps();
 
                 // Indexes
                 $table->index('appraisal_id');
