@@ -19,6 +19,7 @@ class SettingsController extends Controller
         $markets = Market::getAllMarkets();
 
         $settings = [
+            'price_provider' => Setting::get('pricing.provider', 'esi'),
             'cache_ttl' => Setting::get('pricing.cache_ttl', 3600),
             'default_market' => Setting::get('pricing.default_market', 'jita'),
             'retention_days' => Setting::get('appraisal.retention_days', 90),
@@ -38,6 +39,7 @@ class SettingsController extends Controller
     public function save(Request $request)
     {
         $request->validate([
+            'price_provider' => 'required|string|in:esi,seat',
             'cache_ttl' => 'required|integer|min:60|max:86400',
             'default_market' => 'required|string',
             'retention_days' => 'required|integer|min:0|max:3650',
@@ -45,6 +47,7 @@ class SettingsController extends Controller
             'update_frequency' => 'required|integer|min:60|max:1440',
         ]);
 
+        Setting::set('pricing.provider', $request->input('price_provider'), 'pricing');
         Setting::set('pricing.cache_ttl', (int) $request->input('cache_ttl'), 'pricing');
         Setting::set('pricing.default_market', $request->input('default_market'), 'pricing');
         Setting::set('appraisal.retention_days', (int) $request->input('retention_days'), 'appraisal');

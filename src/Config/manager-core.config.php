@@ -13,6 +13,9 @@ return [
 
     'pricing' => [
 
+        // Price Provider: 'esi' (live ESI data) or 'seat' (SeAT price provider system)
+        'provider' => env('MANAGER_CORE_PRICE_PROVIDER', 'esi'),
+
         // Update frequency in minutes (default: 240 = 4 hours)
         'update_frequency' => env('MANAGER_CORE_PRICE_UPDATE_FREQUENCY', 240),
 

@@ -32,6 +32,26 @@
 
                     <h5 class="mb-3"><i class="fas fa-chart-line"></i> Pricing Configuration</h5>
 
+                    <div class="form-group">
+                        <label for="price_provider">Price Provider</label>
+                        <select class="form-control @error('price_provider') is-invalid @enderror"
+                                id="price_provider" name="price_provider" required>
+                            <option value="esi" {{ old('price_provider', $settings['price_provider'] ?? 'esi') == 'esi' ? 'selected' : '' }}>
+                                ESI (Live Market Data - uses ESI rate limits)
+                            </option>
+                            <option value="seat" {{ old('price_provider', $settings['price_provider'] ?? 'esi') == 'seat' ? 'selected' : '' }}>
+                                SeAT Price Provider (uses configured provider, saves ESI limits)
+                            </option>
+                        </select>
+                        <small class="form-text text-muted">
+                            Choose between live ESI data or SeAT's configured price provider system.
+                            <strong>Note:</strong> SeAT provider option requires seat-prices-core to be installed.
+                        </small>
+                        @error('price_provider')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-group">

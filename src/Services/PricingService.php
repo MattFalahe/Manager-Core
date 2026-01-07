@@ -296,7 +296,7 @@ class PricingService
     }
 
     /**
-     * Update market prices from ESI
+     * Update market prices using configured price provider
      *
      * @param string $market
      * @return void
@@ -314,6 +314,37 @@ class PricingService
 
         Log::info("[Manager Core] Updating prices for " . count($typeIds) . " types in market: {$market}");
 
-        $this->esiService->updateMarketPrices($typeIds, $market);
+        // Get the configured price provider
+        $priceProvider = $this->getPriceProvider();
+
+        if (!$priceProvider->isAvailable()) {
+            Log::error("[Manager Core] Price provider '{$priceProvider->getName()}' is not available");
+            return;
+        }
+
+        Log::info("[Manager Core] Using price provider: {$priceProvider->getName()}");
+
+        $priceProvider->getPrices($typeIds, $market);
+    }
+
+    /**
+     * Get the configured price provider instance
+     *
+     * @return \ManagerCore\Services\PriceProviders\PriceProviderInterface
+     */
+    protected function getPriceProvider()
+    {
+        // Get provider from settings (fallback to config, then to 'esi')
+        $provider = \ManagerCore\Models\Setting::get('pricing.provider')
+                    ?? config('manager-core.pricing.provider', 'esi');
+
+        switch ($provider) {
+            case 'seat':
+                return new \ManagerCore\Services\PriceProviders\SeatPriceProvider();
+
+            case 'esi':
+            default:
+                return new \ManagerCore\Services\PriceProviders\ESIPriceProvider();
+        }
     }
 }
