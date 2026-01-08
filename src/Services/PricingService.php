@@ -299,18 +299,22 @@ class PricingService
      * Update market prices using configured price provider
      *
      * @param string $market
+     * @param array|null $typeIds Optional specific type IDs to update (null = all subscribed)
      * @return void
      */
-    public function updatePrices($market = 'jita')
+    public function updatePrices($market = 'jita', $typeIds = null)
     {
-        $subscribedTypes = $this->getSubscribedTypes($market);
+        // If no specific type IDs provided, get all subscribed types
+        if ($typeIds === null) {
+            $subscribedTypes = $this->getSubscribedTypes($market);
 
-        if (!isset($subscribedTypes[$market])) {
-            Log::info("[Manager Core] No subscribed types for market: {$market}");
-            return;
+            if (!isset($subscribedTypes[$market])) {
+                Log::info("[Manager Core] No subscribed types for market: {$market}");
+                return;
+            }
+
+            $typeIds = $subscribedTypes[$market]->pluck('type_id')->unique()->toArray();
         }
-
-        $typeIds = $subscribedTypes[$market]->pluck('type_id')->unique()->toArray();
 
         Log::info("[Manager Core] Updating prices for " . count($typeIds) . " types in market: {$market}");
 

@@ -37,7 +37,7 @@ class DiagnoseBridgeCommand extends Command
         // Refresh discovery if requested
         if ($this->option('refresh')) {
             $this->info('🔄 Refreshing plugin discovery...');
-            $bridge->discoverPlugins();
+            $bridge->discover();
             $this->info('✅ Discovery completed' . PHP_EOL);
         }
 
@@ -79,12 +79,16 @@ class DiagnoseBridgeCommand extends Command
 
         $tableData = [];
         foreach ($plugins as $plugin) {
-            $status = $this->getStatusIcon($plugin->status);
+            $status = $plugin->is_active ? 'active' : 'inactive';
+            $statusIcon = $this->getStatusIcon($status);
+            $version = $plugin->metadata['version'] ?? $plugin->version ?? 'N/A';
+            $lastSeen = $plugin->last_seen_at ? $plugin->last_seen_at->diffForHumans() : 'Never';
+
             $tableData[] = [
                 $plugin->plugin_name,
-                $plugin->version ?? 'N/A',
-                $status . ' ' . ucfirst($plugin->status),
-                $plugin->updated_at->diffForHumans(),
+                $version,
+                $statusIcon . ' ' . ucfirst($status),
+                $lastSeen,
             ];
         }
 
@@ -94,7 +98,7 @@ class DiagnoseBridgeCommand extends Command
         );
 
         // Summary
-        $activeCount = $plugins->where('status', 'active')->count();
+        $activeCount = $plugins->where('is_active', true)->count();
         $totalCount = $plugins->count();
 
         $this->line("  📊 Total Plugins: {$totalCount}");
@@ -111,7 +115,7 @@ class DiagnoseBridgeCommand extends Command
         $this->line('🎯 PLUGIN CAPABILITIES');
         $this->line('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-        $plugins = PluginRegistry::where('status', 'active')->get();
+        $plugins = PluginRegistry::where('is_active', true)->get();
 
         if ($plugins->isEmpty()) {
             $this->warn('  ⚠️  No active plugins to show capabilities');
@@ -145,7 +149,7 @@ class DiagnoseBridgeCommand extends Command
         $this->line('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
         $plugins = PluginRegistry::all();
-        $activePlugins = $plugins->where('status', 'active');
+        $activePlugins = $plugins->where('is_active', true);
 
         $recommendations = [];
 
