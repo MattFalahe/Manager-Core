@@ -93,6 +93,56 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
     {
         $bridge = $this->app->make(\ManagerCore\Services\PluginBridge::class);
         $bridge->discover();
+
+        // Register Manager Core's capabilities
+        $this->registerCapabilities($bridge);
+    }
+
+    /**
+     * Register Manager Core's capabilities with the Plugin Bridge
+     *
+     * @param \ManagerCore\Services\PluginBridge $bridge
+     * @return void
+     */
+    private function registerCapabilities($bridge)
+    {
+        try {
+            // Register pricing capabilities
+            $bridge->registerCapability('ManagerCore', 'pricing.getPrice', function ($typeId, $market = 'jita', $priceType = 'both') {
+                $pricingService = app(\ManagerCore\Services\PricingService::class);
+                return $pricingService->getPrice($typeId, $market, $priceType);
+            });
+
+            $bridge->registerCapability('ManagerCore', 'pricing.getPrices', function ($typeIds, $market = 'jita', $priceType = 'both') {
+                $pricingService = app(\ManagerCore\Services\PricingService::class);
+                return $pricingService->getPrice($typeIds, $market, $priceType);
+            });
+
+            $bridge->registerCapability('ManagerCore', 'pricing.getTrend', function ($typeId, $market = 'jita', $days = 7) {
+                $pricingService = app(\ManagerCore\Services\PricingService::class);
+                return $pricingService->getTrend($typeId, $market, $days);
+            });
+
+            $bridge->registerCapability('ManagerCore', 'pricing.subscribeTypes', function ($pluginName, $typeIds, $market = 'jita', $priority = 1) {
+                $pricingService = app(\ManagerCore\Services\PricingService::class);
+                return $pricingService->subscribeTypes($pluginName, $typeIds, $market, $priority);
+            });
+
+            // Register appraisal capabilities
+            $bridge->registerCapability('ManagerCore', 'appraisal.create', function ($rawInput, $options = []) {
+                $appraisalService = app(\ManagerCore\Services\AppraisalService::class);
+                return $appraisalService->createAppraisal($rawInput, $options);
+            });
+
+            $bridge->registerCapability('ManagerCore', 'appraisal.get', function ($appraisalId, $privateToken = null) {
+                $appraisalService = app(\ManagerCore\Services\AppraisalService::class);
+                return $appraisalService->getAppraisal($appraisalId, $privateToken);
+            });
+
+            Log::info('[Manager Core] Registered capabilities with Plugin Bridge');
+        } catch (\Exception $e) {
+            Log::warning('[Manager Core] Could not register capabilities: ' . $e->getMessage());
+        }
     }
 
     /**

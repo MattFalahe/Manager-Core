@@ -171,6 +171,20 @@ class PluginBridge
 
         $this->capabilities[$pluginName][$capability] = $handler;
 
+        // Update database registry with capabilities
+        try {
+            $plugin = PluginRegistry::where('plugin_name', $pluginName)->first();
+            if ($plugin) {
+                $capabilities = $plugin->capabilities ?? [];
+                if (!in_array($capability, $capabilities)) {
+                    $capabilities[] = $capability;
+                    $plugin->update(['capabilities' => $capabilities]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning("[Manager Core] Could not update capabilities in registry: " . $e->getMessage());
+        }
+
         Log::info("[Manager Core] Plugin '{$pluginName}' registered capability: {$capability}");
     }
 
