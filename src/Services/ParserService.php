@@ -3,6 +3,7 @@
 namespace ManagerCore\Services;
 
 use Illuminate\Support\Facades\Log;
+use Seat\Eveapi\Models\Sde\InvType;
 
 /**
  * ParserService - Parses various EVE Online data formats
@@ -256,14 +257,57 @@ class ParserService
     }
 
     /**
-     * Validate item names against SDE (future implementation)
+     * Validate item names against SDE
      *
-     * @param array $items
-     * @return array
+     * @param array $items Array of items with 'name', 'quantity', 'is_bpc', 'line'
+     * @return array ['valid' => [], 'invalid' => []]
      */
     public function validateItems($items)
     {
-        // TODO: Validate against universe_types table or use SeAT's type service
-        return $items;
+        $validated = [
+            'valid' => [],
+            'invalid' => [],
+        ];
+
+        foreach ($items as $item) {
+            $itemName = $item['name'];
+            $type = null;
+
+            // Try exact match first (case-insensitive)
+            $type = InvType::whereRaw('LOWER(typeName) = ?', [strtolower(trim($itemName))])->first();
+
+            // Try with " Blueprint" suffix for BPCs
+            if (!$type && isset($item['is_bpc']) && $item['is_bpc']) {
+                $type = InvType::whereRaw('LOWER(typeName) = ?', [strtolower(trim($itemName) . ' Blueprint')])->first();
+                if ($type) {
+                    Log::debug("[Manager Core] Found BPC with Blueprint suffix: {$itemName} -> {$type->typeName}");
+                }
+            }
+
+            if ($type) {
+                // Item found in SDE - add type_id and mark as valid
+                $item['type_id'] = $type->typeID;
+                $item['type_name'] = $type->typeName; // Use official name from SDE
+                $item['group_id'] = $type->groupID ?? null;
+                $item['category_id'] = $type->group->categoryID ?? null;
+                $validated['valid'][] = $item;
+
+                Log::debug("[Manager Core] Validated item: {$itemName} -> Type ID {$type->typeID}");
+            } else {
+                // Item not found in SDE - mark as invalid
+                $validated['invalid'][] = [
+                    'name' => $itemName,
+                    'quantity' => $item['quantity'],
+                    'line' => $item['line'] ?? null,
+                    'reason' => 'Item not found in EVE Online database',
+                ];
+
+                Log::warning("[Manager Core] Invalid item name: {$itemName}");
+            }
+        }
+
+        Log::info("[Manager Core] Validated " . count($validated['valid']) . " items, " . count($validated['invalid']) . " invalid");
+
+        return $validated;
     }
 }

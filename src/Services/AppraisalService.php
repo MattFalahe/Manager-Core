@@ -61,15 +61,28 @@ class AppraisalService
 
             Log::info("[Manager Core] Parsed input successfully", ['item_count' => count($parseResult['items']), 'parser' => $parseResult['parser']]);
 
-            // Resolve item names to type IDs
-            $items = $this->resolveTypeIds($parseResult['items']);
+            // Validate items against SDE
+            $validationResult = $this->parser->validateItems($parseResult['items']);
 
-            if (empty($items)) {
-                Log::error("[Manager Core] Failed to resolve any item names to type IDs");
+            if (empty($validationResult['valid'])) {
+                Log::error("[Manager Core] No valid items found after validation");
                 throw new \Exception('Could not resolve any item names. Please check spelling and try again.');
             }
 
-            Log::info("[Manager Core] Resolved items", ['resolved_count' => count($items)]);
+            $items = $validationResult['valid'];
+
+            // Log invalid items for debugging
+            if (!empty($validationResult['invalid'])) {
+                Log::warning("[Manager Core] Found invalid items", [
+                    'invalid_count' => count($validationResult['invalid']),
+                    'invalid_items' => array_column($validationResult['invalid'], 'name')
+                ]);
+            }
+
+            Log::info("[Manager Core] Validated items", [
+                'valid_count' => count($items),
+                'invalid_count' => count($validationResult['invalid'])
+            ]);
 
             // Get market and configuration
             $market = $options['market'] ?? config('manager-core.pricing.default_market', 'jita');
@@ -87,7 +100,13 @@ class AppraisalService
             $appraisal->price_percentage = $pricePercentage;
             $appraisal->is_private = $isPrivate;
             $appraisal->parser_info = json_encode(['parser' => $parseResult['parser']]);
-            $appraisal->unparsed_lines = json_encode($parseResult['unparsed']);
+
+            // Combine unparsed lines and invalid items
+            $unparsedData = [
+                'unparsed_lines' => $parseResult['unparsed'],
+                'invalid_items' => $validationResult['invalid'] ?? []
+            ];
+            $appraisal->unparsed_lines = json_encode($unparsedData);
 
             if ($isPrivate) {
                 $appraisal->private_token = Str::random(32);
@@ -245,43 +264,6 @@ class AppraisalService
         ]);
     }
 
-    /**
-     * Resolve item names to type IDs using SDE
-     *
-     * @param array $items
-     * @return array
-     */
-    protected function resolveTypeIds(array $items)
-    {
-        $resolved = [];
-
-        foreach ($items as $item) {
-            $itemName = trim($item['name']);
-
-            // Try exact match first
-            $type = InvType::where('typeName', $itemName)->first();
-
-            // Try case-insensitive match
-            if (!$type) {
-                $type = InvType::whereRaw('LOWER(typeName) = ?', [strtolower($itemName)])->first();
-            }
-
-            // Try fuzzy match (e.g., with Blueprint suffix for BPCs)
-            if (!$type && $item['is_bpc']) {
-                $type = InvType::where('typeName', $itemName . ' Blueprint')->first();
-            }
-
-            if ($type) {
-                $item['type_id'] = $type->typeID;
-                $item['type_name'] = $type->typeName;
-                $resolved[] = $item;
-            } else {
-                Log::warning("[Manager Core] Could not resolve item name: {$itemName}");
-            }
-        }
-
-        return $resolved;
-    }
 
     /**
      * Generate a unique appraisal ID

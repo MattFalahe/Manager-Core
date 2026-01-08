@@ -170,18 +170,52 @@
         </div>
         @endif
 
-        @if($appraisal->unparsed_lines && count(json_decode($appraisal->unparsed_lines, true)) > 0)
+        @php
+            $unparsedData = json_decode($appraisal->unparsed_lines, true) ?? [];
+            $unparsedLines = $unparsedData['unparsed_lines'] ?? $unparsedData ?? [];
+            $invalidItems = $unparsedData['invalid_items'] ?? [];
+            $hasUnparsedLines = is_array($unparsedLines) && count($unparsedLines) > 0;
+            $hasInvalidItems = is_array($invalidItems) && count($invalidItems) > 0;
+        @endphp
+
+        @if($hasUnparsedLines || $hasInvalidItems)
         <div class="card border-warning">
             <div class="card-header bg-warning">
-                <h3 class="card-title"><i class="fas fa-exclamation-triangle"></i> Unparsed Lines</h3>
+                <h3 class="card-title"><i class="fas fa-exclamation-triangle"></i> Parsing Issues</h3>
             </div>
             <div class="card-body">
-                <p class="text-muted">The following lines could not be parsed:</p>
-                <ul class="list-unstyled">
-                    @foreach(json_decode($appraisal->unparsed_lines, true) as $line)
-                        <li><code>{{ $line }}</code></li>
-                    @endforeach
-                </ul>
+                @if($hasInvalidItems)
+                    <h5 class="text-danger">Invalid Items</h5>
+                    <p class="text-muted">The following items were not found in EVE Online database:</p>
+                    <ul class="list-unstyled mb-3">
+                        @foreach($invalidItems as $invalid)
+                            <li>
+                                <code>{{ $invalid['name'] ?? 'Unknown' }}</code>
+                                @if(isset($invalid['quantity']))
+                                    <span class="text-muted">(Qty: {{ number_format($invalid['quantity']) }})</span>
+                                @endif
+                                @if(isset($invalid['line']))
+                                    <small class="text-muted">- Line {{ $invalid['line'] }}</small>
+                                @endif
+                            </li>
+                        @endforeach
+                    </ul>
+                @endif
+
+                @if($hasUnparsedLines)
+                    <h5 class="text-warning">Unparsed Lines</h5>
+                    <p class="text-muted">The following lines could not be parsed:</p>
+                    <ul class="list-unstyled">
+                        @foreach($unparsedLines as $lineNum => $line)
+                            <li>
+                                @if(is_numeric($lineNum))
+                                    <small class="text-muted">Line {{ $lineNum }}:</small>
+                                @endif
+                                <code>{{ $line }}</code>
+                            </li>
+                        @endforeach
+                    </ul>
+                @endif
             </div>
         </div>
         @endif
