@@ -124,6 +124,11 @@ class AppraisalService
             // Auto-subscribe to these type IDs for future price updates
             $this->subscribeToTypes($items, $market);
 
+            // Fetch prices immediately for this appraisal
+            $typeIds = array_column($items, 'type_id');
+            Log::info("[Manager Core] Fetching prices for {$market} for " . count($typeIds) . " items");
+            $this->pricing->updatePrices($market, $typeIds);
+
             // Create appraisal items and calculate totals
             $this->populateAppraisalItems($appraisal, $items);
 
