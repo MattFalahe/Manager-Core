@@ -65,7 +65,7 @@
                         </div>
                     </div>
 
-                    <button type="submit" class="btn btn-primary btn-lg">
+                    <button type="submit" class="btn btn-primary btn-lg" id="appraisal-submit-btn">
                         <i class="fas fa-calculator"></i> Create Appraisal
                     </button>
                 </form>
@@ -73,6 +73,75 @@
         </div>
     </div>
 </div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" tabindex="-1" role="dialog" data-backdrop="static" data-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-body text-center py-5">
+                <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+                    <span class="sr-only">Loading...</span>
+                </div>
+                <h4 class="mb-3" id="loading-message">Hamsters are calculating hard...</h4>
+                <div class="progress" style="height: 25px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
+                </div>
+                <p class="text-muted mt-3" id="loading-tip">This may take a moment for large appraisals</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    const funMessages = [
+        "Hamsters are calculating hard...",
+        "Consulting the market wizards...",
+        "Crunching the numbers...",
+        "Negotiating with Jita traders...",
+        "Spinning up the quantum calculators...",
+        "Asking CONCORD for advice...",
+        "Running the numbers through the wormhole...",
+        "Bribing market analysts...",
+        "Summoning the spreadsheet spirits...",
+        "Teaching monkeys to do math...",
+        "Counting all the ISK...",
+        "Waking up the accountants...",
+        "Consulting the EVE gods...",
+        "Decrypting ancient price scrolls..."
+    ];
+
+    let messageInterval;
+    let messageIndex = 0;
+
+    $('form').on('submit', function(e) {
+        // Show loading modal
+        $('#loadingModal').modal('show');
+
+        // Start with first message
+        $('#loading-message').text(funMessages[0]);
+
+        // Rotate messages every 3 seconds
+        messageIndex = 1;
+        messageInterval = setInterval(function() {
+            $('#loading-message').fadeOut(300, function() {
+                $(this).text(funMessages[messageIndex]).fadeIn(300);
+                messageIndex = (messageIndex + 1) % funMessages.length;
+            });
+        }, 3000);
+
+        // Count items to give better feedback
+        const itemCount = $('#raw_input').val().trim().split('\n').filter(line => line.trim()).length;
+        if (itemCount > 100) {
+            $('#loading-tip').text(`Processing ${itemCount} items - this may take 30-60 seconds`);
+        } else if (itemCount > 20) {
+            $('#loading-tip').text(`Processing ${itemCount} items - almost done!`);
+        } else {
+            $('#loading-tip').text('Processing your items...');
+        }
+    });
+});
+</script>
 
 <div class="row mt-3">
     <div class="col-md-12">
