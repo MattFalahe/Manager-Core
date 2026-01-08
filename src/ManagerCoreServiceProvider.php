@@ -3,6 +3,7 @@
 namespace ManagerCore;
 
 use Seat\Services\AbstractSeatPlugin;
+use Illuminate\Support\Facades\Log;
 use ManagerCore\Console\Commands\UpdateMarketPricesCommand;
 use ManagerCore\Console\Commands\CleanupOldPricesCommand;
 use ManagerCore\Console\Commands\DiagnosePluginBridgeCommand;
