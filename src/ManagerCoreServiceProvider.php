@@ -125,7 +125,7 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
 
             $bridge->registerCapability('ManagerCore', 'pricing.subscribeTypes', function ($pluginName, $typeIds, $market = 'jita', $priority = 1) {
                 $pricingService = app(\ManagerCore\Services\PricingService::class);
-                return $pricingService->subscribeTypes($pluginName, $typeIds, $market, $priority);
+                return $pricingService->registerTypes($pluginName, $typeIds, $market, $priority);
             });
 
             // Register appraisal capabilities
