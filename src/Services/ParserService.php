@@ -160,8 +160,13 @@ class ParserService
                 continue;
             }
 
-            // Split by tabs
+            // Split by tabs first
             $parts = explode("\t", $line);
+
+            // If only one part, try splitting by multiple spaces
+            if (count($parts) < 2) {
+                $parts = preg_split('/\s{2,}/', $line);
+            }
 
             if (count($parts) >= 2) {
                 $itemName = trim($parts[0]);
@@ -270,15 +275,26 @@ class ParserService
         ];
 
         foreach ($items as $item) {
-            $itemName = $item['name'];
+            $itemName = trim($item['name']);
             $type = null;
 
-            // Try exact match first (case-insensitive)
-            $type = InvType::whereRaw('LOWER(typeName) = ?', [strtolower(trim($itemName))])->first();
+            // Try exact match first
+            $type = InvType::where('typeName', $itemName)->first();
+
+            // Try case-insensitive match if exact match failed
+            if (!$type) {
+                $type = InvType::whereRaw('LOWER(typeName) = LOWER(?)', [$itemName])->first();
+            }
 
             // Try with " Blueprint" suffix for BPCs
             if (!$type && isset($item['is_bpc']) && $item['is_bpc']) {
-                $type = InvType::whereRaw('LOWER(typeName) = ?', [strtolower(trim($itemName) . ' Blueprint')])->first();
+                $blueprintName = $itemName . ' Blueprint';
+                $type = InvType::where('typeName', $blueprintName)->first();
+
+                if (!$type) {
+                    $type = InvType::whereRaw('LOWER(typeName) = LOWER(?)', [$blueprintName])->first();
+                }
+
                 if ($type) {
                     Log::debug("[Manager Core] Found BPC with Blueprint suffix: {$itemName} -> {$type->typeName}");
                 }
@@ -302,7 +318,7 @@ class ParserService
                     'reason' => 'Item not found in EVE Online database',
                 ];
 
-                Log::warning("[Manager Core] Invalid item name: {$itemName}");
+                Log::warning("[Manager Core] Invalid item name: '{$itemName}'");
             }
         }
 
