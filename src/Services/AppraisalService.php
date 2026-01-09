@@ -209,6 +209,8 @@ class AppraisalService
                 $appraisalItem->appraisal_id = $appraisal->id;
                 $appraisalItem->type_id = $item['type_id'];
                 $appraisalItem->type_name = $type->typeName;
+                $appraisalItem->group_id = $type->groupID ?? null;
+                $appraisalItem->category_id = $type->group->categoryID ?? null;
                 $appraisalItem->quantity = $quantity;
                 $appraisalItem->type_volume = $typeVolume;
                 $appraisalItem->total_volume = $typeVolume * $quantity;
