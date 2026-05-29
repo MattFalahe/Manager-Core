@@ -3,7 +3,12 @@
 @section('title', trans('manager-core::manager-core.dashboard'))
 @section('page_header', trans('manager-core::manager-core.dashboard'))
 
+@push('head')
+<link rel="stylesheet" href="{{ asset('vendor/manager-core/css/manager-core.css') }}?v=1">
+@endpush
+
 @section('full')
+<div class="manager-core-wrapper manager-core-dashboard">
 <div class="row">
     <div class="col-md-3">
         <div class="info-box">
@@ -48,7 +53,7 @@
 
 <div class="row">
     <div class="col-md-6">
-        <div class="card">
+        <div class="card card-dark">
             <div class="card-header">
                 <h3 class="card-title">Recent Appraisals</h3>
             </div>
@@ -86,7 +91,7 @@
     </div>
 
     <div class="col-md-6">
-        <div class="card">
+        <div class="card card-dark">
             <div class="card-header">
                 <h3 class="card-title">Connected Plugins</h3>
             </div>
@@ -110,5 +115,6 @@
             </div>
         </div>
     </div>
+</div>
 </div>
 @endsection

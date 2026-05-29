@@ -107,7 +107,7 @@ class DiagnoseESICommand extends Command
 
         try {
             $start = microtime(true);
-            $response = Http::timeout(10)->get('https://esi.evetech.net/latest/status/');
+            $response = Http::connectTimeout(5)->timeout(10)->get('https://esi.evetech.net/latest/status/');
             $duration = round((microtime(true) - $start) * 1000, 2);
 
             if ($response->successful()) {
@@ -158,7 +158,7 @@ class DiagnoseESICommand extends Command
             $start = microtime(true);
 
             try {
-                $response = Http::timeout(10)->get($endpoint['url']);
+                $response = Http::connectTimeout(5)->timeout(10)->get($endpoint['url']);
                 $duration = round((microtime(true) - $start) * 1000, 2);
                 $this->stats['total_time'] += $duration;
 
@@ -219,13 +219,13 @@ class DiagnoseESICommand extends Command
         $this->info('🏪 MARKET CONNECTIVITY TEST');
         $this->line('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-        $markets = config('manager-core.pricing.markets', [
-            'jita' => 10000002,
-            'amarr' => 10000043,
-            'dodixie' => 10000032,
-            'rens' => 10000030,
-            'hek' => 10000042,
-        ]);
+        // Test every configured market regardless of enable state so the
+        // operator can use this diagnostic to debug disabled-market issues.
+        $marketsConfig = \ManagerCore\Models\Market::getEffectiveMarkets(false);
+        $markets = [];
+        foreach ($marketsConfig as $key => $config) {
+            $markets[$key] = is_array($config) ? ($config['region_id'] ?? 0) : $config;
+        }
 
         $this->line('  Testing market order endpoints...');
         $this->newLine();
@@ -237,7 +237,7 @@ class DiagnoseESICommand extends Command
 
             try {
                 $url = "https://esi.evetech.net/latest/markets/{$regionId}/orders/?order_type=all&page=1";
-                $response = Http::timeout(10)->get($url);
+                $response = Http::connectTimeout(5)->timeout(10)->get($url);
                 $duration = round((microtime(true) - $start) * 1000, 2);
                 $this->stats['total_time'] += $duration;
 
@@ -295,7 +295,7 @@ class DiagnoseESICommand extends Command
 
         // Make a test request to get rate limit headers
         try {
-            $response = Http::get('https://esi.evetech.net/latest/status/');
+            $response = Http::connectTimeout(5)->timeout(10)->get('https://esi.evetech.net/latest/status/');
 
             $errorLimit = $response->header('X-Esi-Error-Limit-Remain');
             $errorReset = $response->header('X-Esi-Error-Limit-Reset');
@@ -353,7 +353,7 @@ class DiagnoseESICommand extends Command
             $start = microtime(true);
 
             try {
-                $response = Http::timeout(5)->get("https://esi.evetech.net/latest/universe/types/{$typeId}/");
+                $response = Http::connectTimeout(5)->timeout(5)->get("https://esi.evetech.net/latest/universe/types/{$typeId}/");
                 $duration = round((microtime(true) - $start) * 1000, 2);
                 $this->stats['total_time'] += $duration;
 

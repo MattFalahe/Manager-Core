@@ -34,7 +34,17 @@ class MarketDataService
     }
 
     /**
-     * Update market prices for given type IDs
+     * Update market prices for given type IDs.
+     *
+     * Dispatches to the right fetcher based on the market's type. Hub
+     * markets (Jita, Amarr, etc.) use the public ESI region-orders
+     * endpoint. Citadel markets (player-owned structures with a market
+     * module) use the authenticated structure-orders endpoint with a
+     * Bearer token from the market's configured auth character.
+     *
+     * Operators choose which markets are citadel vs hub via the Markets
+     * admin page. The market_type column on manager_core_markets is
+     * the discriminator.
      *
      * @param array $typeIds
      * @param string $market
@@ -42,95 +52,237 @@ class MarketDataService
      */
     public function updateMarketPrices(array $typeIds, $market = 'jita')
     {
-        $marketConfig = config("manager-core.pricing.markets.{$market}");
+        $marketConfig = \ManagerCore\Models\Market::getMarketConfig($market);
 
         if (!$marketConfig) {
             Log::error("[Manager Core] Unknown market: {$market}");
             return;
         }
 
-        $regionId = $marketConfig['region_id'];
-        $systemIds = $marketConfig['system_ids'] ?? [];
-
-        Log::info("[Manager Core] Fetching market orders for region {$regionId} ({$market})");
-
-        // Fetch all orders for the region (paginated)
-        $allOrders = $this->fetchRegionOrders($regionId);
-
-        if (empty($allOrders)) {
-            Log::warning("[Manager Core] No orders fetched for region {$regionId}");
+        // Hub markets only path. Citadel markets are now served by third-
+        // party providers (Goonpraisal/Janice) since CCP's structure-orders
+        // ESI endpoint has unfixable pagination problems on large hubs.
+        // If a citadel market reaches this method, log and bail — the
+        // operator should configure a provider via the Markets admin UI.
+        $marketType = $marketConfig['market_type'] ?? \ManagerCore\Models\Market::TYPE_HUB;
+        if ($marketType === \ManagerCore\Models\Market::TYPE_CITADEL) {
+            Log::info("[Manager Core] Market '{$market}' is a citadel — ESI direct fetch removed; configure a third-party provider (Goonpraisal/Janice) for this market.");
             return;
         }
 
-        // Filter orders by system IDs if specified
-        if (!empty($systemIds)) {
-            $allOrders = array_filter($allOrders, function ($order) use ($systemIds) {
-                return in_array($order['system_id'] ?? 0, $systemIds);
-            });
+        $regionId = $marketConfig['region_id'];
+        $systemIds = $marketConfig['system_ids'] ?? [];
+
+        // Freshness short-circuit. Skip type_ids whose buy AND sell rows
+        // were updated within the configured hub TTL — most ticks during
+        // an hour see the same subscribed types and re-fetching unchanged
+        // prices wastes ESI budget. The configured TTL is operator-tunable
+        // via Setting('pricing.hub_ttl_seconds') with a 30-minute default
+        // that aligns with CCP's market-cache TTL.
+        $hubTtlSeconds = (int) \ManagerCore\Helpers\Settings::get(
+            'pricing.hub_ttl_seconds',
+            'pricing.hub_ttl_seconds',
+            1800  // 30 min default
+        );
+        $totalRequested = count($typeIds);
+        $typeIds = $this->filterFreshHubTypes($typeIds, $market, $hubTtlSeconds);
+        $skipped = $totalRequested - count($typeIds);
+        if ($skipped > 0) {
+            Log::info("[Manager Core] Skipped {$skipped}/{$totalRequested} types in '{$market}' — prices fresh within {$hubTtlSeconds}s TTL");
         }
-
-        // Group orders by type_id
-        $ordersByType = [];
-        foreach ($allOrders as $order) {
-            $typeId = $order['type_id'];
-            if (in_array($typeId, $typeIds)) {
-                $ordersByType[$typeId][] = $order;
-            }
-        }
-
-        // Calculate and save price statistics for each type
-        foreach ($ordersByType as $typeId => $orders) {
-            $this->calculateAndSavePrices($typeId, $orders, $market);
-        }
-
-        Log::info("[Manager Core] Updated prices for " . count($ordersByType) . " types in {$market}");
-    }
-
-    /**
-     * Fetch all market orders for a region (with pagination)
-     *
-     * @param int $regionId
-     * @return array
-     */
-    protected function fetchRegionOrders($regionId)
-    {
-        $allOrders = [];
-        $page = 1;
-
-        do {
-            $url = "{$this->baseUrl}/markets/{$regionId}/orders/?datasource=tranquility&order_type=all&page={$page}";
-
+        if (empty($typeIds)) {
+            Log::info("[Manager Core] All requested types in '{$market}' are within TTL; nothing to fetch.");
             try {
-                $response = Http::timeout($this->timeout)->get($url);
+                $row = \ManagerCore\Models\Market::where('key', $market)->first();
+                if ($row) $row->recordRefresh(\ManagerCore\Models\Market::STATUS_OK);
+            } catch (\Throwable $e) { /* non-fatal */ }
+            return;
+        }
 
-                if (!$response->successful()) {
-                    Log::error("[Manager Core] ESI request failed: {$url} - Status: {$response->status()}");
-                    break;
+        Log::info("[Manager Core] Fetching market orders for region {$regionId} ({$market}) - " . count($typeIds) . " types");
+
+        $updatedCount = 0;
+        $totalTypes = count($typeIds);
+
+        // Process types in batches for concurrent requests.
+        //
+        // ESI's rate limit is ~100 req/sec sustained per IP for public
+        // endpoints. Batch size 25 with 0.5s pacing between batches sits
+        // safely at ~50 req/sec peak. Previous batches of 10 were overly
+        // conservative — bumping to 25 gives ~2.5x speed on big refresh
+        // jobs without putting us anywhere near the error budget.
+        $batchSize = 25;
+        $batches = array_chunk($typeIds, $batchSize);
+
+        foreach ($batches as $batchIndex => $batch) {
+            try {
+                // Fetch first page for all types in this batch concurrently
+                $responses = Http::pool(function ($pool) use ($batch, $regionId) {
+                    foreach ($batch as $typeId) {
+                        $url = "{$this->baseUrl}/markets/{$regionId}/orders/?datasource=tranquility&order_type=all&type_id={$typeId}&page=1";
+                        $pool->as((string) $typeId)->connectTimeout(5)->timeout($this->timeout)->get($url);
+                    }
+                });
+
+                // Process responses for this batch
+                foreach ($batch as $typeId) {
+                    try {
+                        $response = $responses[$typeId];
+
+                        if ($response->failed()) {
+                            if ($response->status() === 404) {
+                                // No orders for this type, skip silently
+                                continue;
+                            }
+                            Log::error("[Manager Core] ESI request failed for type {$typeId} - Status: {$response->status()}");
+                            continue;
+                        }
+
+                        $typeOrders = [];
+                        $orders = $response->json();
+
+                        if (empty($orders)) {
+                            continue;
+                        }
+
+                        // Filter by system if specified
+                        foreach ($orders as $order) {
+                            if (empty($systemIds) || in_array($order['system_id'] ?? 0, $systemIds)) {
+                                $typeOrders[] = $order;
+                            }
+                        }
+
+                        // Check if there are more pages
+                        $totalPages = (int) $response->header('X-Pages', 1);
+
+                        // Limit to reasonable number of pages to prevent memory issues
+                        $maxPages = 10;
+                        if ($totalPages > $maxPages) {
+                            Log::warning("[Manager Core] Type {$typeId} has {$totalPages} pages, limiting to {$maxPages} pages");
+                            $totalPages = $maxPages;
+                        }
+
+                        // Fetch remaining pages if any (sequentially for this type)
+                        if ($totalPages > 1) {
+                            for ($page = 2; $page <= $totalPages; $page++) {
+                                try {
+                                    $url = "{$this->baseUrl}/markets/{$regionId}/orders/?datasource=tranquility&order_type=all&type_id={$typeId}&page={$page}";
+                                    $pageResponse = Http::connectTimeout(5)->timeout($this->timeout)->get($url);
+
+                                    if (!$pageResponse->successful()) {
+                                        break;
+                                    }
+
+                                    $pageOrders = $pageResponse->json();
+                                    if (empty($pageOrders)) {
+                                        break;
+                                    }
+
+                                    // Filter by system if specified
+                                    foreach ($pageOrders as $order) {
+                                        if (empty($systemIds) || in_array($order['system_id'] ?? 0, $systemIds)) {
+                                            $typeOrders[] = $order;
+                                        }
+                                    }
+                                } catch (\Exception $e) {
+                                    Log::error("[Manager Core] Error fetching page {$page} for type {$typeId}: " . $e->getMessage());
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Calculate and save prices for this type
+                        if (!empty($typeOrders)) {
+                            $this->calculateAndSavePrices($typeId, $typeOrders, $market);
+                            $updatedCount++;
+                        }
+
+                        // Clear memory after processing each type
+                        unset($typeOrders, $orders, $response);
+
+                    } catch (\Exception $e) {
+                        Log::error("[Manager Core] Error processing type {$typeId}: " . $e->getMessage());
+                        continue;
+                    }
                 }
 
-                $orders = $response->json();
+                // Clear batch responses from memory
+                unset($responses);
 
-                if (empty($orders)) {
-                    break;
-                }
+                // Log progress after each batch
+                $processedSoFar = min(($batchIndex + 1) * $batchSize, $totalTypes);
+                Log::info("[Manager Core] Processed {$processedSoFar}/{$totalTypes} types, updated {$updatedCount} with prices");
 
-                $allOrders = array_merge($allOrders, $orders);
-                $page++;
-
-                // Check if there are more pages (ESI returns X-Pages header)
-                $totalPages = $response->header('X-Pages');
-                if ($totalPages && $page > $totalPages) {
-                    break;
+                // Small delay between batches to respect rate limits and prevent overwhelming the server
+                if ($batchIndex < count($batches) - 1) {
+                    usleep(500000); // 0.5 second delay between batches
                 }
 
             } catch (\Exception $e) {
-                Log::error("[Manager Core] Error fetching orders: " . $e->getMessage());
-                break;
+                Log::error("[Manager Core] Error processing batch {$batchIndex}: " . $e->getMessage());
+                continue;
             }
+        }
 
-        } while (true);
+        Log::info("[Manager Core] Completed: Updated prices for {$updatedCount}/{$totalTypes} types in {$market}");
 
-        return $allOrders;
+        // Record successful refresh on the Market row so the admin UI +
+        // diagnostics show "last updated N minutes ago". Wrapped in
+        // a try because hub markets seeded only in config (not in DB)
+        // won't have a row to update — that's fine, log already captured it.
+        try {
+            $marketRow = \ManagerCore\Models\Market::where('key', $market)->first();
+            if ($marketRow) {
+                $marketRow->recordRefresh(\ManagerCore\Models\Market::STATUS_OK);
+            }
+        } catch (\Throwable $e) {
+            // Non-fatal
+        }
+    }
+    /**
+     * Filter a list of type_ids down to those that DON'T have a fresh
+     * MarketPrice row for this market within the TTL window.
+     *
+     * "Fresh" means BOTH sides (buy + sell) updated within $ttlSeconds.
+     * If only buy or only sell exists, the type still gets re-fetched —
+     * catches the case where ESI started returning one-sided orders.
+     *
+     * Returns an empty array when every requested type is fresh (caller
+     * short-circuits without making any ESI calls).
+     *
+     * Used by the hub-market refresh path to skip wasted re-fetches of
+     * types whose prices haven't aged out yet. Significant speedup on
+     * frequent appraisals that hit the same subscribed type pool.
+     */
+    protected function filterFreshHubTypes(array $typeIds, string $market, int $ttlSeconds): array
+    {
+        if ($ttlSeconds <= 0 || empty($typeIds)) {
+            return $typeIds;
+        }
+        $threshold = now()->subSeconds($ttlSeconds);
+
+        // Find which (type_id, market) pairs have BOTH sides fresh.
+        // GROUP BY + HAVING is fast on the existing (type_id, market)
+        // index; no full table scan.
+        try {
+            $freshTypeIds = MarketPrice::where('market', $market)
+                ->whereIn('type_id', $typeIds)
+                ->where('updated_at', '>=', $threshold)
+                ->groupBy('type_id')
+                ->havingRaw('COUNT(*) >= 2')  // both buy + sell rows present
+                ->pluck('type_id')
+                ->map(fn($id) => (int) $id)
+                ->toArray();
+        } catch (\Throwable $e) {
+            // Table missing during install / fresh boot — assume nothing is
+            // fresh so the refresh proceeds normally.
+            return $typeIds;
+        }
+
+        $freshSet = array_flip($freshTypeIds);
+        return array_values(array_filter($typeIds,
+            fn($id) => !isset($freshSet[(int) $id])
+        ));
     }
 
     /**

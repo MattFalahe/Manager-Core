@@ -23,8 +23,11 @@ class CreateManagerCoreTypeSubscriptionsTable extends Migration
                 $table->timestamps();
 
                 // Unique constraint - each plugin can subscribe to a type/market once
-                $table->unique(['plugin_name', 'type_id', 'market']);
+                $table->unique(['plugin_name', 'type_id', 'market'], 'mc_subs_plugin_type_market_unique');
                 $table->index(['market', 'priority']);
+
+                // type_id + market lookup index (folded from 000009)
+                $table->index(['type_id', 'market'], 'mc_subs_type_market_idx');
             });
         }
     }

@@ -34,6 +34,9 @@ class Appraisal extends Model
         'is_private',
         'private_token',
         'expires_at',
+        // Added by migration 000021. Null means "operator chose Use global
+        // default" or the row predates the per-appraisal provider feature.
+        'price_provider',
     ];
 
     /**

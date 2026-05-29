@@ -32,7 +32,11 @@ class PricingController extends Controller
      */
     public function index()
     {
-        $markets = config('manager-core.pricing.markets', []);
+        // Include disabled markets so the listing shows every configured
+        // market, not just the ones the scheduled cron is currently
+        // polling. Disabled markets still show up because operators
+        // routinely pre-seed them and enable later.
+        $markets = \ManagerCore\Models\Market::getEffectiveMarkets(false);
         $subscriptions = TypeSubscription::with([])
             ->select('market', \DB::raw('count(*) as count'))
             ->groupBy('market')
@@ -54,7 +58,8 @@ class PricingController extends Controller
      */
     public function showType($typeId, Request $request)
     {
-        $market = $request->input('market', config('manager-core.pricing.default_market'));
+        // A5 fix: honor operator's pricing.default_market Setting before falling back to config.
+        $market = $request->input('market', \ManagerCore\Helpers\Settings::get('pricing.default_market', 'pricing.default_market', 'jita'));
 
         $prices = $this->pricingService->getPrice($typeId, $market);
         $trend = $this->pricingService->getTrend($typeId, $market, 7);

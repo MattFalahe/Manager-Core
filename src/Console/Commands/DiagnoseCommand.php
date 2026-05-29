@@ -413,9 +413,10 @@ class DiagnoseCommand extends Command
         if ($latestAppraisal && $this->option('detailed')) {
             $this->newLine();
             $this->line('  <fg=cyan>Latest Appraisal Details:</>');;
-            $this->line("  • Code: {$latestAppraisal->code}");
-            $this->line("  • Items: {$latestAppraisal->item_count}");
-            $this->line("  • Value: " . number_format($latestAppraisal->total_value, 2) . " ISK");
+            $this->line("  • ID: {$latestAppraisal->appraisal_id}");
+            $this->line("  • Items: {$latestAppraisal->items()->count()}");
+            $this->line("  • Buy Total: " . number_format($latestAppraisal->total_buy, 2) . " ISK");
+            $this->line("  • Sell Total: " . number_format($latestAppraisal->total_sell, 2) . " ISK");
             $this->line("  • Market: {$latestAppraisal->market}");
             $this->line("  • Created: {$latestAppraisal->created_at->diffForHumans()}");
         }
@@ -497,7 +498,8 @@ class DiagnoseCommand extends Command
                     ->first();
 
                 if ($price) {
-                    $this->line("  • Tritanium sell price: " . number_format($price->price ?? 0, 2) . " ISK");
+                    $this->line("  • Tritanium sell avg: " . number_format($price->price_avg ?? 0, 2) . " ISK");
+                    $this->line("  • Tritanium sell min: " . number_format($price->price_min ?? 0, 2) . " ISK");
                     $this->line("  • Data freshness: " . $price->updated_at->diffForHumans());
                 } else {
                     $this->warn('  ⚠️  Price fetched but not found in database');
@@ -627,14 +629,15 @@ class DiagnoseCommand extends Command
             $priceData[] = [
                 $price->type_id,
                 ucfirst($price->price_type),
-                number_format($price->price, 2),
+                number_format($price->price_avg, 2),
+                number_format($price->price_min, 2) . ' / ' . number_format($price->price_max, 2),
                 number_format($price->volume ?? 0),
                 $price->updated_at->diffForHumans()
             ];
         }
 
         $this->table(
-            ['Type ID', 'Type', 'Price (ISK)', 'Volume', 'Updated'],
+            ['Type ID', 'Type', 'Avg (ISK)', 'Min / Max', 'Volume', 'Updated'],
             $priceData
         );
     }
@@ -720,7 +723,7 @@ class DiagnoseCommand extends Command
 
         // Check if schedule is running
         $latestUpdate = MarketPrice::max('updated_at');
-        if ($latestUpdate && Carbon::parse($latestUpdate)->diffInHours() > 6) {
+        if ($latestUpdate && Carbon::parse($latestUpdate)->diffInHours(now(), true) > 6) {
             $recommendations[] = [
                 '⚠️',
                 'No price updates in 6+ hours',
@@ -773,7 +776,7 @@ class DiagnoseCommand extends Command
     protected function testCache(): bool
     {
         try {
-            $testKey = 'manager_core_cache_test_' . time();
+            $testKey = 'mc_cache_test_' . time();
             Cache::put($testKey, 'test', 60);
             $value = Cache::get($testKey);
             Cache::forget($testKey);

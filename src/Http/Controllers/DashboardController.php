@@ -22,7 +22,10 @@ class DashboardController extends Controller
             'total_appraisals' => Appraisal::count(),
             'recent_appraisals' => Appraisal::orderBy('created_at', 'desc')->limit(5)->get(),
             'tracked_types' => MarketPrice::distinct('type_id')->count('type_id'),
-            'markets' => array_keys(config('manager-core.pricing.markets', [])),
+            // All configured markets, including disabled ones, so the count
+            // reflects what the operator has set up rather than what the
+            // scheduled cron is currently polling.
+            'markets' => array_keys(\ManagerCore\Models\Market::getEffectiveMarkets(false)),
             'plugins' => $bridge->getPlugins(),
         ];
 

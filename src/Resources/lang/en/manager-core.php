@@ -4,8 +4,10 @@ return [
     'dashboard' => 'Manager Core Dashboard',
     'appraisal' => 'Appraisal',
     'pricing' => 'Market Pricing',
-    'bridge' => 'Plugin Bridge',
+    'type_subscriptions' => 'Type Subscriptions',
+    'plugin_bridge' => 'Plugin Bridge',
     'settings' => 'Settings',
+    'help' => 'Help & Documentation',
 
     // Appraisal
     'create_appraisal' => 'Create Appraisal',
@@ -14,6 +16,10 @@ return [
     'price_percentage' => 'Price Percentage',
     'make_private' => 'Make Private',
     'appraise' => 'Appraise',
+
+    // New features
+    'api_tokens' => 'API Tokens',
+    'event_bus' => 'Event Bus',
 
     // Messages
     'appraisal_created' => 'Appraisal created successfully',

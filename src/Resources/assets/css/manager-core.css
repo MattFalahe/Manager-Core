@@ -1,0 +1,2546 @@
+/* ============================================
+   Manager Core - Complete Design System CSS
+   Version: 1.0 - canonical design system port
+
+   Manager Core is the ecosystem hub plugin for Matt's SeAT plugin
+   suite: pricing, appraisals, EventBus, Plugin Bridge, REST API,
+   ESI key pool, diagnostics. This stylesheet provides the canonical
+   chrome (cards, buttons, badges, alerts, tables, forms, help page
+   primitives, etc.) shared visually across the suite, namespaced
+   for Manager Core:
+       --mc-*
+       .mc-*
+       .btn-mc-primary
+
+   Used by: ALL Manager Core pages
+
+   IMPORTANT: All views MUST wrap content in one of these classes:
+   - .manager-core-dashboard (for dashboard pages)
+   - .manager-core-wrapper   (for other pages — primary)
+
+   This prevents SeAT CSS from overriding our styles.
+   ============================================ */
+
+/* ============================================
+   CSS Variables & Color Palette
+   ============================================ */
+:root {
+    /* Primary Colors */
+    --mc-primary-start: #667eea;
+    --mc-primary-end: #764ba2;
+    --mc-dark-bg: #1a1d24;
+    --mc-dark-card: #23262d;
+    --mc-border: #2c3138;
+
+    /* Text Colors */
+    --mc-text-light: #d1d1d1;
+    --mc-text-muted: #9ca3af;
+    --mc-text-white: #ffffff;
+
+    /* Manager Core Domain Tokens (markets, pricing, events) */
+    --mc-pricing-buy: #28a745;     /* green — buy orders */
+    --mc-pricing-sell: #dc3545;    /* red — sell orders */
+    --mc-event-success: #28a745;   /* green — successful event delivery */
+    --mc-event-failed: #dc3545;    /* red — failed event delivery */
+    --mc-event-deferred: #ffc107;  /* yellow — deferred / pending event */
+
+    /* Status Colors */
+    --mc-success: #28a745;
+    --mc-warning: #ffc107;
+    --mc-danger: #dc3545;
+    --mc-info: #17a2b8;
+
+    /* Spacing */
+    --mc-spacing-xs: 5px;
+    --mc-spacing-sm: 10px;
+    --mc-spacing-md: 15px;
+    --mc-spacing-lg: 20px;
+    --mc-spacing-xl: 30px;
+
+    /* Border Radius */
+    --mc-radius-sm: 3px;
+    --mc-radius-md: 5px;
+    --mc-radius-lg: 10px;
+    --mc-radius-xl: 15px;
+
+    /* Transitions */
+    --mc-transition-fast: 0.15s;
+    --mc-transition-normal: 0.3s;
+    --mc-transition-slow: 0.5s;
+}
+
+/* ============================================
+   Base Styles
+   ============================================ */
+.manager-core-dashboard,
+.manager-core-wrapper {
+    font-family: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    color: var(--mc-text-light);
+}
+
+.manager-core-dashboard a,
+.manager-core-wrapper a {
+    transition: all var(--mc-transition-fast) ease;
+}
+
+.manager-core-dashboard a:hover,
+.manager-core-wrapper a:hover {
+    text-decoration: none;
+}
+
+/* ============================================
+   Cards & Containers
+   ============================================ */
+.manager-core-dashboard .card-dark,
+.manager-core-wrapper .card-dark {
+    background-color: var(--mc-dark-bg);
+    border: 1px solid var(--mc-border);
+    transition: all var(--mc-transition-normal) ease;
+}
+
+.manager-core-dashboard .card-dark:hover,
+.manager-core-wrapper .card-dark:hover {
+    border-color: rgba(102, 126, 234, 0.3);
+}
+
+.manager-core-dashboard .card-dark .card-header,
+.manager-core-wrapper .card-dark .card-header {
+    background-color: var(--mc-dark-card);
+    border-bottom: 1px solid var(--mc-border);
+    color: var(--mc-text-white);
+    padding: var(--mc-spacing-md) var(--mc-spacing-lg);
+}
+
+.manager-core-dashboard .card-dark .card-header h3,
+.manager-core-dashboard .card-dark .card-header h4,
+.manager-core-dashboard .card-dark .card-header h5,
+.manager-core-wrapper .card-dark .card-header h3,
+.manager-core-wrapper .card-dark .card-header h4,
+.manager-core-wrapper .card-dark .card-header h5 {
+    margin: 0;
+    font-weight: 600;
+}
+
+.manager-core-dashboard .card-dark .card-header .card-title,
+.manager-core-wrapper .card-dark .card-header .card-title {
+    display: flex;
+    align-items: center;
+    gap: var(--mc-spacing-sm);
+}
+
+.manager-core-dashboard .card-dark .card-body,
+.manager-core-wrapper .card-dark .card-body {
+    color: var(--mc-text-light);
+    padding: var(--mc-spacing-lg);
+}
+
+.manager-core-dashboard .card-dark .card-footer,
+.manager-core-wrapper .card-dark .card-footer {
+    background-color: var(--mc-dark-card);
+    border-top: 1px solid var(--mc-border);
+    padding: var(--mc-spacing-md) var(--mc-spacing-lg);
+}
+
+/* Card with gradient header */
+.manager-core-dashboard .card-gradient-header .card-header,
+.manager-core-wrapper .card-gradient-header .card-header {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    border: none;
+}
+
+/* Card hover effect */
+.manager-core-dashboard .card-hover,
+.manager-core-wrapper .card-hover {
+    transition: transform var(--mc-transition-normal) ease, box-shadow var(--mc-transition-normal) ease;
+}
+
+.manager-core-dashboard .card-hover:hover,
+.manager-core-wrapper .card-hover:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* ============================================
+   Buttons
+   ============================================ */
+.manager-core-dashboard .btn-mc-primary,
+.manager-core-wrapper .btn-mc-primary {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    border: none;
+    color: var(--mc-text-white);
+    transition: all var(--mc-transition-normal) ease;
+}
+
+.manager-core-dashboard .btn-mc-primary:hover,
+.manager-core-wrapper .btn-mc-primary:hover {
+    background: linear-gradient(135deg, #5568d3 0%, #6a3d8f 100%);
+    color: var(--mc-text-white);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.manager-core-dashboard .btn-mc-primary:active,
+.manager-core-wrapper .btn-mc-primary:active {
+    transform: translateY(0);
+}
+
+.manager-core-dashboard .btn-mc-secondary,
+.manager-core-wrapper .btn-mc-secondary {
+    background-color: var(--mc-dark-card);
+    border: 1px solid var(--mc-border);
+    color: var(--mc-text-light);
+}
+
+.manager-core-dashboard .btn-mc-secondary:hover,
+.manager-core-wrapper .btn-mc-secondary:hover {
+    background-color: #2c3138;
+    border-color: rgba(102, 126, 234, 0.5);
+    color: var(--mc-text-white);
+}
+
+/* Button with icon */
+.manager-core-dashboard .btn-icon,
+.manager-core-wrapper .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--mc-spacing-xs);
+}
+
+/* Button loading state */
+.manager-core-dashboard .btn-loading,
+.manager-core-wrapper .btn-loading {
+    position: relative;
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+.manager-core-dashboard .btn-loading::after,
+.manager-core-wrapper .btn-loading::after {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    top: 50%;
+    left: 50%;
+    margin-left: -8px;
+    margin-top: -8px;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    border-top-color: currentColor;
+    animation: spin 0.6s linear infinite;
+}
+
+/* ============================================
+   Badges & Labels
+   ============================================ */
+.manager-core-dashboard .badge-mc,
+.manager-core-wrapper .badge-mc {
+    padding: 4px 8px;
+    border-radius: var(--mc-radius-sm);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.manager-core-dashboard .badge-paid,
+.manager-core-wrapper .badge-paid {
+    background-color: var(--mc-success);
+    color: var(--mc-text-white);
+}
+
+.manager-core-dashboard .badge-pending,
+.manager-core-wrapper .badge-pending {
+    background-color: var(--mc-warning);
+    color: var(--mc-dark-bg);
+}
+
+.manager-core-dashboard .badge-overdue,
+.manager-core-wrapper .badge-overdue {
+    background-color: var(--mc-danger);
+    color: var(--mc-text-white);
+}
+
+.manager-core-dashboard .badge-live,
+.manager-core-wrapper .badge-live {
+    background-color: var(--mc-success);
+    color: var(--mc-text-white);
+    animation: pulse-badge 2s infinite;
+}
+
+@keyframes pulse-badge {
+    0% {
+        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(40, 167, 69, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
+    }
+}
+
+
+/* Status badges (online/offline/shield_vulnerable) — DARK-THEME-SAFE */
+.manager-core-dashboard .status-badge,
+.manager-core-wrapper .status-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.manager-core-dashboard .status-online,
+.manager-core-wrapper .status-online {
+    background-color: rgba(40, 167, 69, 0.15);
+    color: #51cf66;
+    border: 1px solid rgba(40, 167, 69, 0.3);
+}
+
+.manager-core-dashboard .status-offline,
+.manager-core-wrapper .status-offline {
+    background-color: rgba(220, 53, 69, 0.15);
+    color: #ff6b6b;
+    border: 1px solid rgba(220, 53, 69, 0.3);
+}
+
+.manager-core-dashboard .status-shield_vulnerable,
+.manager-core-wrapper .status-shield_vulnerable {
+    background-color: rgba(255, 193, 7, 0.15);
+    color: #ffd43b;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+/* Bootstrap-style badge colors (used by POS detail view) */
+.manager-core-dashboard .badge-danger,
+.manager-core-wrapper .badge-danger {
+    background-color: #ff6b6b;
+    color: var(--mc-text-white);
+    font-weight: bold;
+    font-size: 11px;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+}
+
+.manager-core-dashboard .badge-warning,
+.manager-core-wrapper .badge-warning {
+    background-color: #ffd43b;
+    color: #000000;
+    font-weight: bold;
+}
+
+.manager-core-dashboard .badge-success,
+.manager-core-wrapper .badge-success {
+    background-color: #51cf66;
+    color: var(--mc-text-white);
+    font-weight: bold;
+}
+
+.manager-core-dashboard .badge-info,
+.manager-core-wrapper .badge-info {
+    background-color: #5dade2;
+    color: var(--mc-text-white);
+    font-weight: bold;
+}
+
+.manager-core-dashboard .badge-secondary,
+.manager-core-wrapper .badge-secondary {
+    background-color: #6c757d;
+    color: var(--mc-text-white);
+    font-weight: bold;
+}
+
+/* Custom badge sizing */
+.manager-core-dashboard .badge-custom,
+.manager-core-wrapper .badge-custom {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.875rem;
+}
+
+/* ============================================
+   Tables
+   ============================================ */
+.manager-core-dashboard .table-mc-styled,
+.manager-core-wrapper .table-mc-styled {
+    background-color: transparent;
+    color: var(--mc-text-light);
+    margin-bottom: 0;
+}
+
+.manager-core-dashboard .table-mc-styled thead th,
+.manager-core-wrapper .table-mc-styled thead th {
+    border-bottom: 2px solid var(--mc-border);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.875rem;
+    letter-spacing: 0.5px;
+    color: var(--mc-text-white);
+    padding: var(--mc-spacing-md);
+    white-space: nowrap;
+}
+
+.manager-core-dashboard .table-mc-styled tbody td,
+.manager-core-wrapper .table-mc-styled tbody td {
+    border-bottom: 1px solid var(--mc-border);
+    padding: var(--mc-spacing-md);
+    vertical-align: middle;
+}
+
+.manager-core-dashboard .table-mc-styled tbody tr,
+.manager-core-wrapper .table-mc-styled tbody tr {
+    transition: background-color var(--mc-transition-fast) ease;
+}
+
+.manager-core-dashboard .table-mc-styled tbody tr:hover,
+.manager-core-wrapper .table-mc-styled tbody tr:hover {
+    background-color: rgba(102, 126, 234, 0.1);
+}
+
+.manager-core-dashboard .table-mc-styled tbody tr.table-highlight,
+.manager-core-wrapper .table-mc-styled tbody tr.table-highlight {
+    background-color: rgba(102, 126, 234, 0.2);
+}
+
+.manager-core-dashboard .table-mc-styled tbody tr.table-highlight:hover,
+.manager-core-wrapper .table-mc-styled tbody tr.table-highlight:hover {
+    background-color: rgba(102, 126, 234, 0.3);
+}
+
+/* Striped table */
+.manager-core-dashboard .table-mc-styled.table-striped tbody tr:nth-of-type(odd),
+.manager-core-wrapper .table-mc-styled.table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Compact table */
+.manager-core-dashboard .table-mc-styled.table-compact thead th,
+.manager-core-wrapper .table-mc-styled.table-compact thead th,
+.manager-core-dashboard .table-mc-styled.table-compact tbody td,
+.manager-core-wrapper .table-mc-styled.table-compact tbody td {
+    padding: var(--mc-spacing-xs) var(--mc-spacing-sm);
+    font-size: 0.875rem;
+}
+
+/* Responsive table wrapper */
+.manager-core-dashboard .table-responsive-mc-wrap,
+.manager-core-wrapper .table-responsive-mc-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.manager-core-dashboard .table-responsive-mc-wrap::-webkit-scrollbar,
+.manager-core-wrapper .table-responsive-mc-wrap::-webkit-scrollbar {
+    height: 8px;
+}
+
+.manager-core-dashboard .table-responsive-mc-wrap::-webkit-scrollbar-track,
+.manager-core-wrapper .table-responsive-mc-wrap::-webkit-scrollbar-track {
+    background: var(--mc-dark-bg);
+}
+
+.manager-core-dashboard .table-responsive-mc-wrap::-webkit-scrollbar-thumb,
+.manager-core-wrapper .table-responsive-mc-wrap::-webkit-scrollbar-thumb {
+    background: var(--mc-border);
+    border-radius: 4px;
+}
+
+.manager-core-dashboard .table-responsive-mc-wrap::-webkit-scrollbar-thumb:hover,
+.manager-core-wrapper .table-responsive-mc-wrap::-webkit-scrollbar-thumb:hover {
+    background: #3a3f48;
+}
+
+/* ============================================
+   Forms
+   ============================================ */
+.manager-core-dashboard .form-control-mc-styled,
+.manager-core-wrapper .form-control-mc-styled {
+    background-color: var(--mc-dark-card);
+    border: 1px solid var(--mc-border);
+    color: var(--mc-text-light);
+    border-radius: var(--mc-radius-md);
+    padding: 8px 12px;
+    transition: all var(--mc-transition-fast) ease;
+}
+
+.manager-core-dashboard .form-control-mc-styled:focus,
+.manager-core-wrapper .form-control-mc-styled:focus {
+    background-color: var(--mc-dark-bg);
+    border-color: var(--mc-primary-start);
+    color: var(--mc-text-white);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+.manager-core-dashboard .form-control-mc-styled::placeholder,
+.manager-core-wrapper .form-control-mc-styled::placeholder {
+    color: var(--mc-text-muted);
+}
+
+.manager-core-dashboard .form-control-mc-styled:disabled,
+.manager-core-wrapper .form-control-mc-styled:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Custom select */
+.manager-core-dashboard .custom-select-mc-styled,
+.manager-core-wrapper .custom-select-mc-styled {
+    background-color: var(--mc-dark-card);
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' width='4' height='5' viewBox='0 0 4 5'%3e%3cpath fill='%23667eea' d='M2 0L0 2h4zm0 5L0 3h4z'/%3e%3c/svg%3e");
+    border: 1px solid var(--mc-border);
+    color: var(--mc-text-light);
+}
+
+.manager-core-dashboard .custom-select-mc-styled:focus,
+.manager-core-wrapper .custom-select-mc-styled:focus {
+    border-color: var(--mc-primary-start);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+/* Native <select> dropdown popup readability.
+
+   The closed select gets dark-theme styling from Bootstrap, but when the
+   user opens it the popup is OS-native and inherits whatever colors the
+   browser picks. On Windows/Chrome in light-mode-but-dark-page (our case),
+   that defaults to dark-gray text on medium-gray bg — barely readable.
+
+   Setting an explicit background + color on the <option> elements forces
+   the popup chrome to use our palette, matching the rest of the form.
+   Applies to every form-control select inside our wrappers, not just one
+   page. Disabled options get a muted treatment so the visual hierarchy
+   stays — "Janice (not configured)" should still look greyed-out vs the
+   live providers.
+
+   Note: this works on Chrome/Edge/Firefox; Safari mostly ignores option
+   styling for the popup, which is acceptable degraded behavior. */
+.manager-core-dashboard select.form-control option,
+.manager-core-wrapper select.form-control option,
+.manager-core-dashboard select.form-control optgroup,
+.manager-core-wrapper select.form-control optgroup {
+    background-color: var(--mc-dark-card);
+    color: var(--mc-text-light);
+}
+.manager-core-dashboard select.form-control option:disabled,
+.manager-core-wrapper select.form-control option:disabled {
+    color: var(--mc-text-muted);
+    font-style: italic;
+}
+.manager-core-dashboard select.form-control optgroup,
+.manager-core-wrapper select.form-control optgroup {
+    color: var(--mc-text-muted);
+    font-weight: 600;
+}
+
+/* Form labels */
+.manager-core-dashboard .form-label-mc-styled,
+.manager-core-wrapper .form-label-mc-styled {
+    color: var(--mc-text-white);
+    font-weight: 600;
+    margin-bottom: var(--mc-spacing-xs);
+}
+
+/* Input groups */
+.manager-core-dashboard .input-group-mc-styled .input-group-text,
+.manager-core-wrapper .input-group-mc-styled .input-group-text {
+    background-color: var(--mc-dark-card);
+    border: 1px solid var(--mc-border);
+    color: var(--mc-text-muted);
+}
+
+/* ============================================
+   Alert Boxes (canonical .alert-mc-* variants)
+   ============================================ */
+.manager-core-dashboard .alert-mc-styled,
+.manager-core-wrapper .alert-mc-styled {
+    border-radius: var(--mc-radius-md);
+    padding: var(--mc-spacing-md);
+    margin-bottom: var(--mc-spacing-lg);
+    border-left: 4px solid;
+}
+
+.manager-core-dashboard .alert-mc-info,
+.manager-core-wrapper .alert-mc-info {
+    background-color: rgba(23, 162, 184, 0.15);
+    border-left-color: var(--mc-info);
+    color: var(--mc-text-light);
+}
+
+.manager-core-dashboard .alert-mc-success,
+.manager-core-wrapper .alert-mc-success {
+    background-color: rgba(40, 167, 69, 0.15);
+    border-left-color: var(--mc-success);
+    color: var(--mc-text-light);
+}
+
+.manager-core-dashboard .alert-mc-warning,
+.manager-core-wrapper .alert-mc-warning {
+    background-color: rgba(255, 193, 7, 0.15);
+    border-left-color: var(--mc-warning);
+    color: var(--mc-text-light);
+}
+
+.manager-core-dashboard .alert-mc-danger,
+.manager-core-wrapper .alert-mc-danger {
+    background-color: rgba(220, 53, 69, 0.15);
+    border-left-color: var(--mc-danger);
+    color: var(--mc-text-light);
+}
+
+.manager-core-dashboard .alert-mc-styled i,
+.manager-core-wrapper .alert-mc-styled i {
+    margin-right: var(--mc-spacing-sm);
+}
+
+/* Bootstrap-style alert boxes — preserved from existing SM CSS */
+.manager-core-wrapper .alert-info {
+    background: rgba(93, 173, 226, 0.1);
+    border: 1px solid rgba(93, 173, 226, 0.2);
+    border-radius: 0.5rem;
+    color: #e0e0e0;
+    padding: 1rem;
+}
+
+.manager-core-wrapper .alert-success {
+    background: rgba(81, 207, 102, 0.1);
+    border: 1px solid rgba(81, 207, 102, 0.2);
+    border-radius: 0.5rem;
+    color: #e0e0e0;
+    padding: 0.5rem;
+}
+
+.manager-core-wrapper .alert-warning {
+    background: rgba(255, 212, 59, 0.1);
+    border: 1px solid rgba(255, 212, 59, 0.2);
+    border-radius: 0.5rem;
+    color: #e0e0e0;
+    padding: 1rem;
+}
+
+.manager-core-wrapper .alert-danger {
+    background: rgba(255, 107, 107, 0.1);
+    border: 1px solid rgba(255, 107, 107, 0.2);
+    border-radius: 0.5rem;
+    color: #e0e0e0;
+    padding: 1rem;
+}
+
+/* ============================================
+   Progress Bars
+   ============================================ */
+.manager-core-dashboard .progress-mc-styled,
+.manager-core-wrapper .progress-mc-styled {
+    background-color: var(--mc-dark-card);
+    border-radius: var(--mc-radius-lg);
+    height: 20px;
+    overflow: hidden;
+}
+
+.manager-core-dashboard .progress-mc-bar,
+.manager-core-wrapper .progress-mc-bar {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    height: 100%;
+    transition: width var(--mc-transition-slow) ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--mc-text-white);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.manager-core-dashboard .progress-mc-bar.progress-success,
+.manager-core-wrapper .progress-mc-bar.progress-success {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+}
+
+.manager-core-dashboard .progress-mc-bar.progress-warning,
+.manager-core-wrapper .progress-mc-bar.progress-warning {
+    background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+}
+
+.manager-core-dashboard .progress-mc-bar.progress-danger,
+.manager-core-wrapper .progress-mc-bar.progress-danger {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+}
+
+/* Animated progress bar */
+.manager-core-dashboard .progress-mc-bar.animated,
+.manager-core-wrapper .progress-mc-bar.animated {
+    background-size: 20px 20px;
+    animation: progress-bar-stripes 1s linear infinite;
+}
+
+@keyframes progress-bar-stripes {
+    0% { background-position: 20px 0; }
+    100% { background-position: 0 0; }
+}
+
+/* Uniform progress bars — bar + percentage label to the right */
+.mc-progress-wrap {
+    display: flex;
+    align-items: center;
+}
+.mc-progress-wrap .progress {
+    flex: 1;
+    border-radius: 3px;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+.mc-progress-wrap .progress .progress-bar {
+    border-radius: 3px;
+}
+.mc-progress-wrap .mc-pct-label {
+    min-width: 45px;
+    text-align: right;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #ccc;
+    margin-left: 8px;
+    white-space: nowrap;
+}
+
+/* Progress bars — POS-style overrides preserved from existing SM CSS */
+.manager-core-wrapper .progress {
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.manager-core-wrapper .progress-bar {
+    transition: width 0.6s ease;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ============================================
+   Stat Cards
+   ============================================ */
+.manager-core-dashboard .stat-card,
+.manager-core-wrapper .stat-card {
+    background: var(--mc-dark-bg);
+    border: 1px solid var(--mc-border);
+    border-radius: var(--mc-radius-lg);
+    padding: var(--mc-spacing-lg);
+    transition: all var(--mc-transition-normal) ease;
+}
+
+.manager-core-dashboard .stat-card:hover,
+.manager-core-wrapper .stat-card:hover {
+    border-color: rgba(102, 126, 234, 0.5);
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.manager-core-dashboard .stat-card-icon,
+.manager-core-wrapper .stat-card-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: var(--mc-radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    margin-bottom: var(--mc-spacing-md);
+}
+
+.manager-core-dashboard .stat-card-icon.gradient,
+.manager-core-wrapper .stat-card-icon.gradient {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    color: var(--mc-text-white);
+}
+
+.manager-core-dashboard .stat-card-label,
+.manager-core-wrapper .stat-card-label {
+    font-size: 0.875rem;
+    color: var(--mc-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: var(--mc-spacing-xs);
+}
+
+.manager-core-dashboard .stat-card-value,
+.manager-core-wrapper .stat-card-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--mc-text-white);
+    margin-bottom: var(--mc-spacing-xs);
+}
+
+.manager-core-dashboard .stat-card-change,
+.manager-core-wrapper .stat-card-change {
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: var(--mc-spacing-xs);
+}
+
+.manager-core-dashboard .stat-card-change.positive,
+.manager-core-wrapper .stat-card-change.positive {
+    color: var(--mc-success);
+}
+
+.manager-core-dashboard .stat-card-change.negative,
+.manager-core-wrapper .stat-card-change.negative {
+    color: var(--mc-danger);
+}
+
+/* Stat boxes (preserved from existing SM CSS — modernized to dark theme) */
+.manager-core-dashboard .stat-box,
+.manager-core-wrapper .stat-box {
+    background: var(--mc-dark-card);
+    border: 1px solid var(--mc-border);
+    border-radius: var(--mc-radius-md);
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* ============================================
+   Pagination
+   ============================================ */
+.manager-core-dashboard .pagination-mc-styled .page-link,
+.manager-core-wrapper .pagination-mc-styled .page-link {
+    background-color: var(--mc-dark-card);
+    border: 1px solid var(--mc-border);
+    color: var(--mc-text-light);
+    padding: 8px 12px;
+}
+
+.manager-core-dashboard .pagination-mc-styled .page-link:hover,
+.manager-core-wrapper .pagination-mc-styled .page-link:hover {
+    background-color: rgba(102, 126, 234, 0.2);
+    border-color: var(--mc-primary-start);
+    color: var(--mc-text-white);
+}
+
+.manager-core-dashboard .pagination-mc-styled .page-item.active .page-link,
+.manager-core-wrapper .pagination-mc-styled .page-item.active .page-link {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    border-color: var(--mc-primary-start);
+    color: var(--mc-text-white);
+}
+
+.manager-core-dashboard .pagination-mc-styled .page-item.disabled .page-link,
+.manager-core-wrapper .pagination-mc-styled .page-item.disabled .page-link {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ============================================
+   Tooltips (Bootstrap Override)
+   ============================================ */
+.manager-core-dashboard .tooltip-mc-styled .tooltip-inner,
+.manager-core-wrapper .tooltip-mc-styled .tooltip-inner {
+    background-color: var(--mc-dark-card);
+    color: var(--mc-text-white);
+    border: 1px solid var(--mc-border);
+    padding: 8px 12px;
+    border-radius: var(--mc-radius-md);
+}
+
+/* ============================================
+   Loading States
+   ============================================ */
+.manager-core-dashboard .loading-overlay,
+.manager-core-wrapper .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(26, 29, 36, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    border-radius: var(--mc-radius-lg);
+}
+
+.manager-core-dashboard .spinner-mc-styled,
+.manager-core-wrapper .spinner-mc-styled {
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(102, 126, 234, 0.2);
+    border-top-color: var(--mc-primary-start);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ============================================
+   Empty States
+   ============================================ */
+.manager-core-dashboard .empty-state,
+.manager-core-wrapper .empty-state {
+    text-align: center;
+    padding: var(--mc-spacing-xl) var(--mc-spacing-lg);
+    color: var(--mc-text-muted);
+}
+
+.manager-core-dashboard .empty-state-icon,
+.manager-core-wrapper .empty-state-icon {
+    font-size: 4rem;
+    color: rgba(102, 126, 234, 0.3);
+    margin-bottom: var(--mc-spacing-lg);
+}
+
+.manager-core-dashboard .empty-state-title,
+.manager-core-wrapper .empty-state-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--mc-text-light);
+    margin-bottom: var(--mc-spacing-sm);
+}
+
+.manager-core-dashboard .empty-state-description,
+.manager-core-wrapper .empty-state-description {
+    font-size: 1rem;
+    margin-bottom: var(--mc-spacing-lg);
+}
+
+.manager-core-dashboard .empty-state i,
+.manager-core-wrapper .empty-state i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* ============================================
+   Timeline
+   ============================================ */
+.manager-core-dashboard .timeline-mc-styled,
+.manager-core-wrapper .timeline-mc-styled {
+    position: relative;
+    padding-left: 30px;
+}
+
+.manager-core-dashboard .timeline-mc-styled::before,
+.manager-core-wrapper .timeline-mc-styled::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(180deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+}
+
+.manager-core-dashboard .timeline-item,
+.manager-core-wrapper .timeline-item {
+    position: relative;
+    margin-bottom: var(--mc-spacing-lg);
+}
+
+.manager-core-dashboard .timeline-item::before,
+.manager-core-wrapper .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -26px;
+    top: 5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    border: 2px solid var(--mc-dark-bg);
+}
+
+.manager-core-dashboard .timeline-date,
+.manager-core-wrapper .timeline-date {
+    color: var(--mc-text-muted);
+    font-size: 0.875rem;
+    margin-bottom: var(--mc-spacing-xs);
+}
+
+.manager-core-dashboard .timeline-content,
+.manager-core-wrapper .timeline-content {
+    background-color: var(--mc-dark-card);
+    padding: var(--mc-spacing-md);
+    border-radius: var(--mc-radius-md);
+    border: 1px solid var(--mc-border);
+}
+
+/* ============================================
+   Utilities
+   ============================================ */
+.manager-core-dashboard .text-gradient,
+.manager-core-wrapper .text-gradient {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.manager-core-dashboard .bg-gradient-primary,
+.manager-core-wrapper .bg-gradient-primary {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%) !important;
+}
+
+.manager-core-dashboard .shadow-mc-styled,
+.manager-core-wrapper .shadow-mc-styled {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.manager-core-dashboard .shadow-mc-lg,
+.manager-core-wrapper .shadow-mc-lg {
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+}
+
+.manager-core-dashboard .border-gradient,
+.manager-core-wrapper .border-gradient {
+    border: 2px solid;
+    border-image: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%) 1;
+}
+
+/* Character portrait */
+.manager-core-dashboard .character-portrait,
+.manager-core-wrapper .character-portrait {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--mc-border);
+    object-fit: cover;
+    transition: all var(--mc-transition-normal) ease;
+}
+
+.manager-core-dashboard .character-portrait:hover,
+.manager-core-wrapper .character-portrait:hover {
+    border-color: var(--mc-primary-start);
+    transform: scale(1.1);
+}
+
+.manager-core-dashboard .character-portrait.large,
+.manager-core-wrapper .character-portrait.large {
+    width: 64px;
+    height: 64px;
+}
+
+/* ISK value formatting */
+.manager-core-dashboard .isk-value,
+.manager-core-wrapper .isk-value {
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: 600;
+}
+
+.manager-core-dashboard .isk-value::after,
+.manager-core-wrapper .isk-value::after {
+    content: ' ISK';
+    font-weight: normal;
+    color: var(--mc-text-muted);
+    font-size: 0.875em;
+}
+
+/* ============================================
+   Accessibility
+   ============================================ */
+.manager-core-dashboard .sr-only-sm,
+.manager-core-wrapper .sr-only-sm {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.manager-core-dashboard .focus-visible-sm:focus,
+.manager-core-wrapper .focus-visible-sm:focus {
+    outline: 2px solid var(--mc-primary-start);
+    outline-offset: 2px;
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.manager-core-dashboard .fade-in,
+.manager-core-wrapper .fade-in {
+    animation: fadeIn var(--mc-transition-normal) ease;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.manager-core-dashboard .slide-in,
+.manager-core-wrapper .slide-in {
+    animation: slideIn var(--mc-transition-normal) ease;
+}
+
+/* ============================================
+   DASHBOARD-SPECIFIC STYLES
+   ============================================ */
+
+/* ============================================
+   Info Boxes
+   ============================================ */
+.manager-core-dashboard .info-box,
+.manager-core-wrapper .info-box {
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.125), 0 1px 3px rgba(0, 0, 0, 0.2);
+    border-radius: 0.25rem;
+    display: flex;
+    margin-bottom: 1rem;
+    min-height: 80px;
+    padding: 0.5rem;
+    position: relative;
+    width: 100%;
+    transition: all 0.3s ease;
+}
+
+.manager-core-dashboard .info-box:hover,
+.manager-core-wrapper .info-box:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.manager-core-dashboard .info-box .info-box-icon,
+.manager-core-wrapper .info-box .info-box-icon {
+    border-radius: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    width: 70px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.manager-core-dashboard .info-box .info-box-content,
+.manager-core-wrapper .info-box .info-box-content {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.8;
+    flex: 1;
+    padding: 0 10px;
+}
+
+.manager-core-dashboard .info-box .info-box-text,
+.manager-core-wrapper .info-box .info-box-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.9;
+    color: var(--mc-text-white) !important;
+}
+
+.manager-core-dashboard .info-box .info-box-number,
+.manager-core-wrapper .info-box .info-box-number {
+    display: block;
+    font-weight: 700;
+    font-size: 1.5rem;
+    font-family: 'Courier New', Courier, monospace;
+    color: var(--mc-text-white) !important;
+}
+
+.manager-core-dashboard .info-box small,
+.manager-core-wrapper .info-box small {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* ============================================
+   Info Box Gradient Variants
+   ============================================ */
+.manager-core-dashboard .info-box.bg-gradient-primary,
+.manager-core-wrapper .info-box.bg-gradient-primary {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.3) 0%, rgba(118, 75, 162, 0.3) 100%) !important;
+    color: var(--mc-text-white) !important;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(102, 126, 234, 0.2) !important;
+}
+
+.manager-core-dashboard .info-box.bg-gradient-secondary,
+.manager-core-wrapper .info-box.bg-gradient-secondary {
+    background: linear-gradient(135deg, rgba(134, 143, 150, 0.3) 0%, rgba(89, 97, 100, 0.3) 100%) !important;
+    color: var(--mc-text-white) !important;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(134, 143, 150, 0.2) !important;
+}
+
+.manager-core-dashboard .info-box.bg-gradient-success,
+.manager-core-wrapper .info-box.bg-gradient-success {
+    background: linear-gradient(135deg, rgba(40, 167, 69, 0.3) 0%, rgba(32, 201, 151, 0.3) 100%) !important;
+    color: var(--mc-text-white) !important;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(40, 167, 69, 0.2) !important;
+}
+
+.manager-core-dashboard .info-box.bg-gradient-info,
+.manager-core-wrapper .info-box.bg-gradient-info {
+    background: linear-gradient(135deg, rgba(144, 223, 254, 0.3) 0%, rgba(56, 163, 204, 0.3) 100%) !important;
+    color: var(--mc-text-white) !important;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(144, 223, 254, 0.2) !important;
+}
+
+.manager-core-dashboard .info-box.bg-gradient-warning,
+.manager-core-wrapper .info-box.bg-gradient-warning {
+    background: linear-gradient(135deg, rgba(240, 147, 251, 0.3) 0%, rgba(245, 87, 108, 0.3) 100%) !important;
+    color: var(--mc-text-white) !important;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(240, 147, 251, 0.2) !important;
+}
+
+.manager-core-dashboard .info-box.bg-gradient-danger,
+.manager-core-wrapper .info-box.bg-gradient-danger {
+    background: linear-gradient(135deg, rgba(220, 53, 69, 0.3) 0%, rgba(153, 27, 36, 0.3) 100%) !important;
+    color: var(--mc-text-white) !important;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(220, 53, 69, 0.2) !important;
+}
+
+/* MC domain-specific info-box variants (pricing buy/sell, event status) */
+.manager-core-dashboard .info-box.bg-gradient-buy,
+.manager-core-wrapper .info-box.bg-gradient-buy {
+    background: linear-gradient(135deg, rgba(40, 167, 69, 0.3) 0%, rgba(32, 201, 151, 0.3) 100%) !important;
+    color: var(--mc-text-white) !important;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(40, 167, 69, 0.2) !important;
+}
+
+.manager-core-dashboard .info-box.bg-gradient-sell,
+.manager-core-wrapper .info-box.bg-gradient-sell {
+    background: linear-gradient(135deg, rgba(220, 53, 69, 0.3) 0%, rgba(232, 62, 140, 0.3) 100%) !important;
+    color: var(--mc-text-white) !important;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(220, 53, 69, 0.2) !important;
+}
+
+/* ============================================
+   Small Boxes
+   ============================================ */
+.manager-core-dashboard .small-box {
+    border-radius: 0.25rem;
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.125), 0 1px 3px rgba(0, 0, 0, 0.2);
+    display: block;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.manager-core-dashboard .small-box:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+.manager-core-dashboard .small-box > .inner {
+    padding: 10px;
+}
+
+.manager-core-dashboard .small-box > .small-box-footer {
+    background-color: rgba(0, 0, 0, 0.1);
+    color: rgba(255, 255, 255, 0.8) !important;
+    display: block;
+    padding: 3px 0;
+    position: relative;
+    text-align: center;
+    text-decoration: none;
+    z-index: 10;
+    transition: all 0.3s ease;
+}
+
+.manager-core-dashboard .small-box > .small-box-footer:hover {
+    background-color: rgba(0, 0, 0, 0.15);
+    color: var(--mc-text-white) !important;
+    text-decoration: none;
+}
+
+.manager-core-dashboard .small-box h3 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    margin: 0 0 10px;
+    padding: 0;
+    white-space: nowrap;
+    font-family: 'Courier New', Courier, monospace;
+    color: var(--mc-text-white) !important;
+}
+
+.manager-core-dashboard .small-box p {
+    font-size: 1rem;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.manager-core-dashboard .small-box p > small {
+    color: rgba(255, 255, 255, 0.8) !important;
+    display: block;
+    font-size: 0.9rem;
+    margin-top: 5px;
+    opacity: 0.9;
+}
+
+.manager-core-dashboard .small-box .icon {
+    color: rgba(0, 0, 0, 0.15);
+    z-index: 0;
+}
+
+.manager-core-dashboard .small-box .icon > i {
+    font-size: 70px;
+    position: absolute;
+    right: 15px;
+    top: 15px;
+    transition: all 0.3s linear;
+}
+
+.manager-core-dashboard .small-box:hover .icon > i {
+    font-size: 95px;
+    opacity: 0.8;
+}
+
+/* ============================================
+   Dashboard Tables
+   ============================================ */
+.manager-core-dashboard .table-dark,
+.manager-core-wrapper .table-dark {
+    background-color: var(--mc-dark-bg);
+    color: var(--mc-text-light);
+    margin-bottom: 0;
+}
+
+.manager-core-dashboard .table-dark thead th,
+.manager-core-wrapper .table-dark thead th {
+    border-bottom: 2px solid var(--mc-border);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.875rem;
+    letter-spacing: 0.5px;
+    color: var(--mc-text-white);
+    padding: 12px 15px;
+    vertical-align: middle;
+}
+
+.manager-core-dashboard .table-dark tbody td,
+.manager-core-wrapper .table-dark tbody td {
+    border-bottom: 1px solid var(--mc-border);
+    padding: 12px 15px;
+    vertical-align: middle;
+}
+
+.manager-core-dashboard .table-dark tbody tr,
+.manager-core-wrapper .table-dark tbody tr {
+    transition: background-color 0.15s ease;
+}
+
+.manager-core-dashboard .table-dark tbody tr:hover,
+.manager-core-wrapper .table-dark tbody tr:hover {
+    background-color: var(--mc-dark-card);
+}
+
+.manager-core-dashboard .table-dark.table-striped tbody tr:nth-of-type(odd),
+.manager-core-wrapper .table-dark.table-striped tbody tr:nth-of-type(odd) {
+    background-color: #1e2127;
+}
+
+/* Highlighted row (current user) */
+.manager-core-dashboard .table-primary,
+.manager-core-wrapper .table-primary {
+    background-color: rgba(0, 123, 255, 0.2) !important;
+}
+
+.manager-core-dashboard .table-primary:hover,
+.manager-core-wrapper .table-primary:hover {
+    background-color: rgba(0, 123, 255, 0.3) !important;
+}
+
+/* Table with compact spacing */
+.manager-core-dashboard .table-dark.table-compact thead th,
+.manager-core-wrapper .table-dark.table-compact thead th,
+.manager-core-dashboard .table-dark.table-compact tbody td,
+.manager-core-wrapper .table-dark.table-compact tbody td {
+    padding: 8px 12px;
+}
+
+/* List group items (preserved from existing SM CSS) */
+.manager-core-wrapper .list-group-item {
+    transition: background-color 0.2s ease;
+}
+
+.manager-core-wrapper .list-group-item:hover {
+    background-color: rgba(102, 126, 234, 0.05);
+}
+
+/* ============================================
+   Bronze / Silver / Gold Badges
+   ============================================ */
+.manager-core-dashboard .badge-bronze,
+.manager-core-wrapper .badge-bronze {
+    background-color: #cd7f32;
+    color: var(--mc-text-white);
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+.manager-core-dashboard .badge-silver,
+.manager-core-wrapper .badge-silver {
+    background-color: #c0c0c0;
+    color: #333333;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+.manager-core-dashboard .badge-gold,
+.manager-core-wrapper .badge-gold {
+    background-color: #ffd700;
+    color: #333333;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+/* ============================================
+   Chart Containers
+   ============================================ */
+.manager-core-dashboard .chart-container,
+.manager-core-wrapper .chart-container {
+    position: relative;
+    width: 100%;
+    min-height: 300px;
+}
+
+.manager-core-dashboard .chart-container canvas,
+.manager-core-wrapper .chart-container canvas {
+    max-height: 100%;
+    width: 100% !important;
+    height: auto !important;
+}
+
+/* Loading state for charts */
+.manager-core-dashboard .chart-container.loading,
+.manager-core-wrapper .chart-container.loading {
+    opacity: 0.5;
+    pointer-events: none;
+    min-height: 300px;
+}
+
+.manager-core-dashboard .chart-container.loading::after,
+.manager-core-wrapper .chart-container.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 40px;
+    height: 40px;
+    margin: -20px 0 0 -20px;
+    border: 4px solid rgba(102, 126, 234, 0.2);
+    border-top: 4px solid var(--mc-primary-start);
+    border-radius: 50%;
+    animation: spin-chart 1s linear infinite;
+}
+
+@keyframes spin-chart {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Chart legend styling */
+.manager-core-dashboard .chart-legend,
+.manager-core-wrapper .chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid var(--mc-border);
+}
+
+.manager-core-dashboard .chart-legend-item,
+.manager-core-wrapper .chart-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+}
+
+.manager-core-dashboard .chart-legend-color,
+.manager-core-wrapper .chart-legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+}
+
+/* Chart canvas size cap (preserved from existing SM CSS) */
+.manager-core-wrapper canvas {
+    max-height: 400px;
+}
+
+/* ============================================
+   Card Tools
+   ============================================ */
+.manager-core-dashboard .card-tools,
+.manager-core-wrapper .card-tools {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.manager-core-dashboard .card-tools .btn-tool,
+.manager-core-wrapper .card-tools .btn-tool {
+    color: #adb5bd;
+    background: transparent;
+    border: none;
+    padding: 0.25rem 0.5rem;
+    transition: color 0.15s ease;
+    cursor: pointer;
+}
+
+.manager-core-dashboard .card-tools .btn-tool:hover,
+.manager-core-wrapper .card-tools .btn-tool:hover {
+    color: var(--mc-text-white);
+}
+
+.manager-core-dashboard .card-tools .btn-tool:focus,
+.manager-core-wrapper .card-tools .btn-tool:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* ============================================
+   Image Styling
+   ============================================ */
+.manager-core-dashboard .img-circle,
+.manager-core-wrapper .img-circle {
+    border-radius: 50%;
+    border: 2px solid var(--mc-border);
+    transition: border-color 0.3s ease;
+}
+
+.manager-core-dashboard .img-circle:hover,
+.manager-core-wrapper .img-circle:hover {
+    border-color: rgba(102, 126, 234, 0.5);
+}
+
+/* ============================================
+   Dashboard Spacing
+   ============================================ */
+.manager-core-dashboard .row {
+    margin-bottom: 0;
+}
+
+.manager-core-dashboard .card {
+    margin-bottom: 20px;
+}
+
+.manager-core-dashboard .col,
+.manager-core-dashboard [class*="col-"] {
+    margin-bottom: 0;
+}
+
+/* ============================================
+   Scrollbar Styling
+   ============================================ */
+.manager-core-dashboard ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.manager-core-dashboard ::-webkit-scrollbar-track {
+    background: var(--mc-dark-bg);
+    border-radius: 4px;
+}
+
+.manager-core-dashboard ::-webkit-scrollbar-thumb {
+    background: var(--mc-border);
+    border-radius: 4px;
+    transition: background 0.3s ease;
+}
+
+.manager-core-dashboard ::-webkit-scrollbar-thumb:hover {
+    background: #3a3f48;
+}
+
+/* Firefox scrollbar */
+.manager-core-dashboard .manager-core-dashboard,
+.manager-core-wrapper .manager-core-dashboard {
+    scrollbar-width: thin;
+    scrollbar-color: var(--mc-border) var(--mc-dark-bg);
+}
+
+/* ============================================
+   Tooltips (preserved + extended from existing SM CSS)
+   ============================================ */
+.manager-core-dashboard [data-toggle="tooltip"],
+.manager-core-wrapper [data-toggle="tooltip"] {
+    cursor: help;
+    border-bottom: 1px dotted rgba(255, 255, 255, 0.3);
+}
+
+.manager-core-dashboard .tooltip-inner,
+.manager-core-wrapper .tooltip-inner {
+    background-color: var(--mc-dark-card);
+    color: var(--mc-text-white);
+    border: 1px solid var(--mc-border);
+    padding: 8px 12px;
+    border-radius: 5px;
+    font-size: 0.875rem;
+}
+
+.manager-core-dashboard .tooltip.bs-tooltip-top .arrow::before,
+.manager-core-wrapper .tooltip.bs-tooltip-top .arrow::before {
+    border-top-color: var(--mc-dark-card);
+}
+
+.manager-core-dashboard .tooltip.bs-tooltip-bottom .arrow::before,
+.manager-core-wrapper .tooltip.bs-tooltip-bottom .arrow::before {
+    border-bottom-color: var(--mc-dark-card);
+}
+
+.manager-core-dashboard .tooltip.bs-tooltip-left .arrow::before,
+.manager-core-wrapper .tooltip.bs-tooltip-left .arrow::before {
+    border-left-color: var(--mc-dark-card);
+}
+
+.manager-core-dashboard .tooltip.bs-tooltip-right .arrow::before,
+.manager-core-wrapper .tooltip.bs-tooltip-right .arrow::before {
+    border-right-color: var(--mc-dark-card);
+}
+
+/* ============================================
+   Activity Feed
+   ============================================ */
+.manager-core-dashboard .activity-feed,
+.manager-core-wrapper .activity-feed {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.manager-core-dashboard .activity-feed-item,
+.manager-core-wrapper .activity-feed-item {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--mc-border);
+    display: flex;
+    gap: 12px;
+    transition: background-color 0.15s ease;
+}
+
+.manager-core-dashboard .activity-feed-item:last-child,
+.manager-core-wrapper .activity-feed-item:last-child {
+    border-bottom: none;
+}
+
+.manager-core-dashboard .activity-feed-item:hover,
+.manager-core-wrapper .activity-feed-item:hover {
+    background-color: rgba(102, 126, 234, 0.05);
+}
+
+.manager-core-dashboard .activity-feed-icon,
+.manager-core-wrapper .activity-feed-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--mc-primary-start);
+}
+
+.manager-core-dashboard .activity-feed-content,
+.manager-core-wrapper .activity-feed-content {
+    flex: 1;
+}
+
+.manager-core-dashboard .activity-feed-title,
+.manager-core-wrapper .activity-feed-title {
+    font-weight: 600;
+    color: var(--mc-text-white);
+    margin-bottom: 4px;
+}
+
+.manager-core-dashboard .activity-feed-time,
+.manager-core-wrapper .activity-feed-time {
+    font-size: 0.875rem;
+    color: var(--mc-text-muted);
+}
+
+/* ============================================
+   Statistics Grid
+   ============================================ */
+.manager-core-dashboard .dashboard-stats-grid,
+.manager-core-wrapper .dashboard-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+/* ============================================
+   Quick Actions
+   ============================================ */
+.manager-core-dashboard .quick-actions,
+.manager-core-wrapper .quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.manager-core-dashboard .quick-action-btn,
+.manager-core-wrapper .quick-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    color: var(--mc-text-white);
+    border: none;
+    border-radius: 5px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.manager-core-dashboard .quick-action-btn:hover,
+.manager-core-wrapper .quick-action-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    color: var(--mc-text-white);
+    text-decoration: none;
+}
+
+/* ============================================
+   Tab Navigation
+   ============================================ */
+.manager-core-dashboard .nav-tabs {
+    border-bottom: 2px solid #454d55;
+}
+
+.manager-core-dashboard .nav-tabs .nav-link {
+    color: #c2c7d0;
+    font-size: 0.95rem;
+    font-weight: 500;
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    margin-right: 8px;
+    border-radius: 8px 8px 0 0;
+    transition: all 0.3s ease;
+}
+
+.manager-core-dashboard .nav-tabs .nav-link:hover {
+    color: var(--mc-text-white);
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.manager-core-dashboard .nav-tabs .nav-link.active {
+    background-color: #343a40;
+    border: 2px solid #454d55;
+    border-bottom: 2px solid #343a40;
+    color: var(--mc-text-white) !important;
+    font-weight: 600;
+}
+
+.manager-core-dashboard .nav-tabs .nav-link.active i {
+    color: var(--mc-text-white) !important;
+}
+
+.manager-core-dashboard .nav-tabs .nav-link.active .badge {
+    color: var(--mc-text-white) !important;
+}
+
+.manager-core-dashboard .tab-content {
+    padding-top: 20px;
+}
+
+/* Tab Navigation (nav-tabs-custom for all pages) */
+.manager-core-wrapper .nav-tabs-custom {
+    margin-bottom: 0 !important;
+}
+
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs {
+    border-bottom: 2px solid #454d55 !important;
+    background-color: transparent !important;
+}
+
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs > li {
+    margin-right: 8px !important;
+    margin-bottom: -2px !important;
+    border: none !important;
+    background: none !important;
+}
+
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs > li > a {
+    color: #c2c7d0 !important;
+    font-size: 1.1rem !important;
+    font-weight: 500 !important;
+    padding: 12px 24px !important;
+    border: none !important;
+    background: transparent !important;
+    border-radius: 8px 8px 0 0 !important;
+    transition: all 0.3s ease !important;
+    display: inline-block !important;
+}
+
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs > li > a:hover {
+    color: var(--mc-text-white) !important;
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    text-decoration: none !important;
+    border: none !important;
+}
+
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs > li.active > a,
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs > li.active > a:hover,
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs > li.active > a:focus {
+    background-color: #343a40 !important;
+    border: 2px solid #454d55 !important;
+    border-bottom: 2px solid #343a40 !important;
+    color: var(--mc-text-white) !important;
+    font-weight: 600 !important;
+}
+
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs > li.active > a > i {
+    color: var(--mc-text-white) !important;
+}
+
+.manager-core-wrapper .nav-tabs-custom > .nav-tabs > li.active > a > .badge {
+    color: var(--mc-text-white) !important;
+}
+
+.manager-core-wrapper .nav-tabs-custom .tab-content {
+    padding-top: 20px !important;
+    background-color: transparent !important;
+}
+
+/* ============================================
+   Tab Content & Background Enhancement (ULTRA-SPECIFIC)
+   ============================================ */
+
+/* Make tab-content background much darker */
+div.manager-core-dashboard div.tab-content,
+div.manager-core-wrapper div.tab-content {
+    background-color: #0f1115 !important;
+    padding: 20px !important;
+    border-radius: 5px !important;
+}
+
+/* Card backgrounds — ULTRA SPECIFIC */
+div.manager-core-dashboard div.card.card-dark,
+div.manager-core-dashboard div.card.card-dark.card-tabs,
+div.manager-core-wrapper div.card.card-dark,
+div.manager-core-wrapper div.card.card-dark.card-tabs {
+    background-color: #161922 !important;
+    border: 1px solid var(--mc-border) !important;
+}
+
+/* Card headers — ULTRA SPECIFIC */
+div.manager-core-dashboard div.card.card-dark div.card-header,
+div.manager-core-dashboard div.card.card-dark.card-tabs div.card-header,
+div.manager-core-wrapper div.card.card-dark div.card-header,
+div.manager-core-wrapper div.card.card-dark.card-tabs div.card-header {
+    background-color: var(--mc-dark-bg) !important;
+    border-bottom: 1px solid var(--mc-border) !important;
+    color: var(--mc-text-white) !important;
+}
+
+/* Card body — ULTRA SPECIFIC */
+div.manager-core-dashboard div.card-body,
+div.manager-core-dashboard div.card.card-dark div.card-body,
+div.manager-core-dashboard div.card.card-dark.card-tabs div.card-body,
+div.manager-core-wrapper div.card-body,
+div.manager-core-wrapper div.card.card-dark div.card-body,
+div.manager-core-wrapper div.card.card-dark.card-tabs div.card-body {
+    background-color: #161922 !important;
+    color: #e8e8e8 !important;
+}
+
+/* Charts more visible */
+div.manager-core-dashboard div.card-body canvas,
+div.manager-core-wrapper div.card-body canvas {
+    background-color: rgba(26, 29, 36, 0.5) !important;
+    border-radius: 5px !important;
+    padding: 10px !important;
+}
+
+/* Tables in dark background */
+div.manager-core-dashboard table.table,
+div.manager-core-wrapper table.table {
+    color: #e8e8e8 !important;
+    background-color: transparent !important;
+}
+
+div.manager-core-dashboard table.table thead th,
+div.manager-core-wrapper table.table thead th {
+    color: var(--mc-text-white) !important;
+    background-color: var(--mc-dark-bg) !important;
+    border-color: var(--mc-border) !important;
+}
+
+div.manager-core-dashboard table.table tbody tr,
+div.manager-core-wrapper table.table tbody tr {
+    background-color: transparent !important;
+}
+
+div.manager-core-dashboard table.table-striped tbody tr:nth-of-type(odd),
+div.manager-core-wrapper table.table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+div.manager-core-dashboard table.table td,
+div.manager-core-wrapper table.table td {
+    border-color: var(--mc-border) !important;
+    color: #e8e8e8 !important;
+}
+
+/* Muted text */
+div.manager-core-dashboard .text-muted,
+div.manager-core-wrapper .text-muted {
+    color: var(--mc-text-muted) !important;
+}
+
+/* Tab panes darker background */
+div.manager-core-dashboard div.tab-pane,
+div.manager-core-wrapper div.tab-pane {
+    background-color: transparent !important;
+}
+
+/* ============================================
+   Personal & Corporation Badges
+   ============================================ */
+.manager-core-dashboard .personal-badge {
+    background: linear-gradient(to right, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.manager-core-dashboard .corporation-badge {
+    background: linear-gradient(to right, #f093fb 0%, #f5576c 100%);
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+
+/* ============================================
+   No-Print + Margin/Padding Utilities
+   (preserved from existing SM CSS)
+   ============================================ */
+.manager-core-wrapper .no-print {
+    /* Inherits from Bootstrap but ensures it's scoped */
+}
+
+@media print {
+    .manager-core-wrapper .no-print {
+        display: none !important;
+    }
+}
+
+.manager-core-wrapper .mb-0 { margin-bottom: 0 !important; }
+.manager-core-wrapper .mb-1 { margin-bottom: 0.25rem !important; }
+.manager-core-wrapper .mb-2 { margin-bottom: 0.5rem !important; }
+.manager-core-wrapper .mb-3 { margin-bottom: 1rem !important; }
+.manager-core-wrapper .mt-1 { margin-top: 0.25rem !important; }
+.manager-core-wrapper .mt-2 { margin-top: 0.5rem !important; }
+.manager-core-wrapper .mt-3 { margin-top: 1rem !important; }
+.manager-core-wrapper .p-3 { padding: 1rem !important; }
+
+/* D-flex utilities */
+.manager-core-wrapper .d-flex {
+    display: flex !important;
+}
+
+.manager-core-wrapper .justify-content-between {
+    justify-content: space-between !important;
+}
+
+.manager-core-wrapper .align-items-center {
+    align-items: center !important;
+}
+
+.manager-core-wrapper .text-center {
+    text-align: center !important;
+}
+
+/* Row and column spacing (preserved from existing SM CSS) */
+.manager-core-wrapper .row {
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
+}
+
+.manager-core-wrapper [class*="col-"] {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+}
+
+.manager-core-wrapper .card-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* ============================================
+   HELP PAGE STYLES
+   (mirrors MM's help-page convention)
+   ============================================ */
+
+.help-wrapper {
+    display: flex;
+    gap: 20px;
+}
+
+.help-sidebar {
+    flex: 0 0 280px;
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+}
+
+.help-content {
+    flex: 1;
+    min-width: 0;
+    color: var(--mc-text-light) !important;
+}
+
+.help-nav .nav-link {
+    color: #e2e8f0 !important;
+    border-radius: 5px;
+    margin-bottom: 5px;
+    padding: 8px 14px;
+    transition: all 0.3s;
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+.help-nav .nav-link:hover {
+    background: rgba(102, 126, 234, 0.2);
+}
+
+.help-nav .nav-link.active {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+}
+
+.help-nav .nav-link i {
+    width: 24px;
+    text-align: center;
+    margin-right: 10px;
+}
+
+.help-section {
+    display: none;
+    animation: fadeIn 0.3s;
+}
+
+.help-section.active {
+    display: block;
+}
+
+.help-card {
+    background: var(--mc-dark-card);
+    border-radius: 10px;
+    padding: 25px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+.help-card h3 {
+    color: var(--mc-primary-start) !important;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.help-card h4 {
+    color: #9ca3af !important;
+    margin-top: 20px;
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+}
+
+.help-card h5 {
+    color: #e2e8f0 !important;
+    margin-top: 15px;
+    margin-bottom: 8px;
+}
+
+.help-card p {
+    color: #d1d5db !important;
+    line-height: 1.6;
+}
+
+.help-card ul,
+.help-card ol {
+    color: #d1d5db !important;
+    line-height: 1.8;
+    margin-left: 20px;
+}
+
+.help-card strong {
+    color: #e2e8f0 !important;
+}
+
+.help-card li {
+    color: #d1d5db !important;
+}
+
+.help-card code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #fbbf24 !important;
+    font-size: 0.9em;
+}
+
+.help-card pre {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 15px;
+    border-radius: 5px;
+    overflow-x: auto;
+    color: #d1d5db !important;
+}
+
+/* Step-by-step (gradient circle counters) */
+.step-by-step {
+    counter-reset: step-counter;
+    list-style: none;
+    padding-left: 0;
+}
+
+.step-by-step li {
+    counter-increment: step-counter;
+    margin-bottom: 20px;
+    padding-left: 50px;
+    position: relative;
+    color: #d1d5db !important;
+}
+
+.step-by-step li::before {
+    content: counter(step-counter);
+    position: absolute;
+    left: 0;
+    top: 0;
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    color: white;
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 1.1rem;
+}
+
+/* Help page callouts (info / warning / success / purple) */
+.info-box,
+.warning-box,
+.success-box,
+.purple-box {
+    padding: 15px;
+    margin: 15px 0;
+    border-radius: 5px;
+    color: #d1d5db !important;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.info-box {
+    background: rgba(23, 162, 184, 0.15);
+    border-left: 4px solid var(--mc-info);
+}
+
+.warning-box {
+    background: rgba(255, 193, 7, 0.15);
+    border-left: 4px solid var(--mc-warning);
+}
+
+.success-box {
+    background: rgba(28, 200, 138, 0.15);
+    border-left: 4px solid #1cc88a;
+}
+
+/* Generic purple callout (e.g. brand / "what's new" / advanced section) */
+.purple-box {
+    background: rgba(118, 75, 162, 0.15);
+    border-left: 4px solid var(--mc-primary-end);
+}
+
+.info-box > i,
+.warning-box > i,
+.success-box > i,
+.purple-box > i {
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+.info-box > i { color: var(--mc-info); }
+.warning-box > i { color: var(--mc-warning); }
+.success-box > i { color: #1cc88a; }
+.purple-box > i { color: var(--mc-primary-end); }
+
+/* Feature grid + items */
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.feature-item {
+    background: rgba(102, 126, 234, 0.1);
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(102, 126, 234, 0.3);
+}
+
+.feature-item i {
+    font-size: 2rem;
+    color: var(--mc-primary-start);
+    margin-bottom: 10px;
+}
+
+.feature-item h5 {
+    color: #e2e8f0 !important;
+    margin-bottom: 8px;
+}
+
+.feature-item p {
+    color: #9ca3af !important;
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+/* Search box */
+.search-box {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+.search-box input {
+    width: 100%;
+    padding: 12px 45px 12px 15px;
+    background: #2d3748;
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: 8px;
+    color: #e2e8f0 !important;
+}
+
+.search-box i {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+}
+
+/* Quick links (gradient quick-link buttons) */
+.quick-links {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin: 20px 0;
+}
+
+.quick-link {
+    background: linear-gradient(135deg, var(--mc-primary-start) 0%, var(--mc-primary-end) 100%);
+    padding: 15px;
+    border-radius: 8px;
+    text-align: center;
+    color: white;
+    text-decoration: none;
+    transition: transform 0.2s;
+}
+
+.quick-link:hover {
+    transform: translateY(-2px);
+    color: white;
+    text-decoration: none;
+}
+
+.quick-link i {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 8px;
+}
+
+/* FAQ accordion */
+.faq-item {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.faq-question {
+    padding: 15px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s;
+    color: #e2e8f0 !important;
+}
+
+.faq-question:hover {
+    background: rgba(102, 126, 234, 0.1);
+}
+
+.faq-question i {
+    transition: transform 0.3s;
+}
+
+.faq-item.open .faq-question i {
+    transform: rotate(180deg);
+}
+
+.faq-answer {
+    padding: 0 15px;
+    max-height: 0;
+    overflow: hidden;
+    transition: all 0.3s;
+    color: #d1d5db !important;
+}
+
+.faq-item.open .faq-answer {
+    padding: 15px;
+    max-height: 500px;
+}
+
+/* Plugin info table */
+.plugin-info-table {
+    width: 100%;
+    color: #d1d5db !important;
+}
+
+.plugin-info-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.plugin-info-table td:first-child {
+    color: #9ca3af !important;
+    width: 120px;
+    font-weight: 600;
+}
+
+.plugin-info-table td:last-child {
+    color: #e2e8f0 !important;
+}
+
+
+
+/* ============================================
+   Responsive Utilities (canonical)
+   ============================================ */
+@media (max-width: 768px) {
+    .help-wrapper {
+        flex-direction: column;
+    }
+
+    .help-sidebar {
+        position: relative;
+        max-height: none;
+    }
+
+    .feature-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .card-dark .card-body {
+        padding: var(--mc-spacing-md);
+    }
+
+    .stat-card {
+        padding: var(--mc-spacing-md);
+    }
+
+    .stat-card-value {
+        font-size: 1.5rem;
+    }
+
+    .table-mc-styled thead th,
+    .manager-core-dashboard .table-mc-styled tbody td,
+    .manager-core-wrapper .table-mc-styled tbody td {
+        padding: var(--mc-spacing-sm);
+        font-size: 0.875rem;
+    }
+
+    .btn-mc-primary,
+    .btn-mc-secondary {
+        width: 100%;
+        margin-bottom: var(--mc-spacing-sm);
+    }
+
+    .manager-core-wrapper .card-body {
+        padding: 1rem;
+    }
+
+    .manager-core-wrapper dl.row dt,
+    .manager-core-wrapper dl.row dd {
+        width: 100% !important;
+        margin-left: 0 !important;
+    }
+
+    /* Info boxes stack on mobile */
+    .info-box {
+        display: block;
+        text-align: center;
+    }
+
+    .manager-core-dashboard .info-box .info-box-icon,
+    .manager-core-wrapper .info-box .info-box-icon {
+        width: 100%;
+        height: 80px;
+        margin-bottom: 10px;
+    }
+
+    .manager-core-dashboard .info-box .info-box-content,
+    .manager-core-wrapper .info-box .info-box-content {
+        text-align: center;
+        padding: 0;
+    }
+
+    /* Small box icon adjustments */
+    .small-box .icon > i {
+        font-size: 50px;
+    }
+
+    .small-box:hover .icon > i {
+        font-size: 60px;
+    }
+
+    .small-box h3 {
+        font-size: 1.5rem;
+    }
+
+    /* Dashboard grid becomes single column */
+    .dashboard-stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Tables get horizontal scroll */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Charts adjust height */
+    .chart-container {
+        min-height: 250px;
+    }
+}
+
+@media (max-width: 576px) {
+    :root {
+        --mc-spacing-lg: 15px;
+        --mc-spacing-xl: 20px;
+    }
+
+    .stat-card-icon {
+        width: 50px;
+        height: 50px;
+        font-size: 1.5rem;
+    }
+
+    .info-box .info-box-number {
+        font-size: 1.25rem;
+    }
+
+    .info-box .info-box-text {
+        font-size: 0.75rem;
+    }
+
+    .small-box h3 {
+        font-size: 1.25rem;
+    }
+
+    .small-box p {
+        font-size: 0.875rem;
+    }
+
+    .quick-actions {
+        flex-direction: column;
+    }
+
+    .quick-action-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* ============================================
+   Print Styles
+   ============================================ */
+@media print {
+    .btn,
+    .card-tools,
+    .pagination-mc-styled,
+    .quick-actions,
+    .small-box-footer {
+        display: none !important;
+    }
+
+    .card-dark {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    .table-mc-styled,
+    .table-dark {
+        font-size: 0.875rem;
+    }
+
+    .info-box,
+    .small-box {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #000;
+    }
+
+    .chart-container {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+}
+
+/* ============================================
+   Reduced motion
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+    .manager-core-dashboard *,
+    .info-box,
+    .small-box,
+    .manager-core-dashboard .chart-container.loading::after,
+    .manager-core-wrapper .chart-container.loading::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* ============================================
+   End of Manager Core design system
+   ============================================ */

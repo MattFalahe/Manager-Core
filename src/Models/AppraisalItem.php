@@ -23,6 +23,8 @@ class AppraisalItem extends Model
         'appraisal_id',
         'type_id',
         'type_name',
+        'group_id',
+        'category_id',
         'quantity',
         'type_volume',
         'total_volume',
@@ -42,6 +44,8 @@ class AppraisalItem extends Model
     protected $casts = [
         'appraisal_id' => 'integer',
         'type_id' => 'integer',
+        'group_id' => 'integer',
+        'category_id' => 'integer',
         'quantity' => 'integer',
         'type_volume' => 'decimal:4',
         'total_volume' => 'decimal:4',

@@ -20,6 +20,9 @@ class CreateManagerCorePluginRegistryTable extends Migration
                 $table->string('plugin_class', 255);
                 $table->string('version', 20)->nullable();
                 $table->json('capabilities')->nullable(); // Array of capability names
+                // Free-form plugin metadata (e.g. icon, package URL, etc.).
+                // (folded from 000009)
+                $table->json('metadata')->nullable();
                 $table->boolean('is_active')->default(true);
                 $table->timestamp('last_seen_at')->nullable();
                 $table->timestamps();
