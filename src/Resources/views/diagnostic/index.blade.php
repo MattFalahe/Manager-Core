@@ -378,11 +378,20 @@
                 {{-- TAB: Event Bus --}}
                 <div class="tab-pane fade" id="tab-events">
                     <div class="diag-tab-intro">
-                        <p><strong>What this tab does:</strong> Lists every active EventBus subscription across all plugins, shows recent events from the event log with their dispatch status, and reports event-bus statistics.</p>
-                        <p><strong>When to use:</strong> When verifying that cross-plugin events fire (for example Structure Manager alerts reaching Mining Manager), or when debugging a subscriber that is not reacting.</p>
+                        <p><strong>What this tab does:</strong> Two views of the EventBus. The <strong>Topic Matrix</strong> is the cross-plugin communication graph — every registered topic, who publishes it, who subscribes, and whether it's actually flowing. Below that, the raw subscription list, recent events with dispatch status, and event-bus statistics.</p>
+                        <p><strong>When to use:</strong> Start with the Topic Matrix to confirm cross-plugin links are wired and flowing (for example Corp Wallet Manager's member signals reaching HR Manager, or Structure Manager alerts reaching Mining Manager). Drop to the raw lists or the Event Trace tab when debugging a specific subscriber.</p>
                         <p><strong>Heads up:</strong> <strong>Publish Test Event</strong> emits a real event and writes a row to <code>manager_core_event_log</code>.</p>
                     </div>
-                    <h4 style="color: #e2e8f0; margin-bottom: 15px;"><i class="fas fa-broadcast-tower"></i> Event Bus</h4>
+
+                    <h4 style="color: #e2e8f0; margin-bottom: 15px;"><i class="fas fa-project-diagram"></i> Topic Matrix <span style="font-size: 0.8rem; color: #8b95a5; font-weight: normal;">cross-plugin communication graph</span></h4>
+                    <button class="btn btn-mc mb-3" onclick="loadIntegrationMatrix()"><i class="fas fa-sitemap"></i> Load Topic Matrix</button>
+                    <div id="matrix-results">
+                        <div class="empty-state"><i class="fas fa-info-circle"></i> Click "Load Topic Matrix" to see every topic's publisher, subscribers, and flow status.</div>
+                    </div>
+
+                    <hr style="border-color: #2c3138; margin: 24px 0;">
+
+                    <h4 style="color: #e2e8f0; margin-bottom: 15px;"><i class="fas fa-broadcast-tower"></i> Subscriptions, recent events &amp; stats</h4>
                     <button class="btn btn-mc mb-3" onclick="loadEventBus()"><i class="fas fa-sync-alt"></i> Refresh</button>
                     <button class="btn btn-mc mb-3" onclick="testEventPublish()"><i class="fas fa-paper-plane"></i> Publish Test Event</button>
                     <div id="event-results"></div>
@@ -541,6 +550,32 @@ function loadSystemOverview() {
 }
 
 // ---- Plugin Testing ----
+
+// Map a plugin's 6-state value (full / partial / discovered / standalone /
+// offline / error) to a badge class + label so this tab matches the Plugin
+// Registry page exactly. Falls back to the legacy status (active / installed
+// / not_installed) when state is absent — e.g. not-installed plugins that
+// never reached the bridge.
+function pluginStateBadge(p) {
+    const stateMap = {
+        full:       { cls: 'badge-active',    label: 'full exchange' },
+        partial:    { cls: 'badge-active',    label: 'partial' },
+        discovered: { cls: 'badge-installed', label: 'discovered' },
+        standalone: { cls: 'badge-installed', label: 'standalone' },
+        offline:    { cls: 'badge-inactive',  label: 'offline' },
+        error:      { cls: 'badge-critical',  label: 'error' },
+    };
+    if (p.state && stateMap[p.state]) {
+        return stateMap[p.state];
+    }
+    const statusMap = {
+        active:        { cls: 'badge-active',    label: 'active' },
+        installed:     { cls: 'badge-installed', label: 'installed' },
+        not_installed: { cls: 'badge-inactive',  label: 'not installed' },
+    };
+    return statusMap[p.status] || { cls: 'badge-inactive', label: (p.status || 'unknown').replace('_', ' ') };
+}
+
 function testPlugin(key) {
     const statusEl = document.getElementById('status-' + key);
     const detailsEl = document.getElementById('details-' + key);
@@ -551,16 +586,17 @@ function testPlugin(key) {
     fetchJson(baseUrl + '/test-plugin/' + key, 'POST').then(data => {
         if (!data.success) { statusEl.textContent = 'Error'; detailsEl.innerHTML = '<p style="color:#dc3545;">' + (data.message || 'Test failed') + '</p>'; detailsEl.style.display = 'block'; return; }
         const p = data.data;
-        const map = { active: 'badge-active', installed: 'badge-installed', not_installed: 'badge-inactive' };
-        statusEl.className = 'badge-status ' + (map[p.status] || 'badge-inactive');
-        statusEl.textContent = p.status.replace('_', ' ');
+        const badge = pluginStateBadge(p);
+        statusEl.className = 'badge-status ' + badge.cls;
+        statusEl.textContent = badge.label;
 
         let html = '<p><strong>Class:</strong> ' + (p.class_exists ? '&#10003; Found' : '&#10007; Not found') + '</p>';
         html += '<p><strong>Bridge:</strong> ' + (p.bridge_registered ? '&#10003; Registered' : '&#10007; Not registered') + '</p>';
-        if (p.subscription_count > 0) html += '<p><strong>Subscriptions:</strong> ' + p.subscription_count + ' type IDs</p>';
+        if (p.state_reason) html += '<p><strong>State:</strong> ' + p.state_reason + '</p>';
+        if (p.subscription_count > 0) html += '<p><strong>Pricing subscriptions:</strong> ' + p.subscription_count + ' type IDs</p>';
         if (p.capabilities && p.capabilities.length > 0) html += '<p><strong>Capabilities:</strong> ' + p.capabilities.join(', ') + '</p>';
         if (p.last_seen) html += '<p><strong>Last seen:</strong> ' + p.last_seen + '</p>';
-        if (p.issues && p.issues.length > 0) html += '<p style="color: #ffc107;"><strong>Issues:</strong> ' + p.issues.join('; ') + '</p>';
+        if (p.issues && p.issues.length > 0) html += '<p style="color: #ffc107;"><strong>Notes:</strong> ' + p.issues.join('; ') + '</p>';
         html += '<p style="color: #8b95a5; font-size: 0.8rem;">' + p.duration_ms + 'ms</p>';
 
         detailsEl.innerHTML = html;
@@ -588,12 +624,13 @@ function testAllPlugins() {
             const statusEl = document.getElementById('status-' + key);
             const detailsEl = document.getElementById('details-' + key);
             if (!statusEl) continue;
-            const map = { active: 'badge-active', installed: 'badge-installed', not_installed: 'badge-inactive' };
-            statusEl.className = 'badge-status ' + (map[p.status] || 'badge-inactive');
-            statusEl.textContent = (p.status || 'unknown').replace('_', ' ');
+            const badge = pluginStateBadge(p);
+            statusEl.className = 'badge-status ' + badge.cls;
+            statusEl.textContent = badge.label;
 
             let html = '<p>' + (p.installed ? '&#10003; Installed' : '&#10007; Not installed') + '</p>';
-            if (p.subscription_count > 0) html += '<p>Subscriptions: ' + p.subscription_count + '</p>';
+            if (p.state_reason) html += '<p style="color:#8b95a5;">' + p.state_reason + '</p>';
+            if (p.subscription_count > 0) html += '<p>Pricing subscriptions: ' + p.subscription_count + '</p>';
             if (p.issues && p.issues.length > 0) html += '<p style="color: #ffc107;">' + p.issues.join('; ') + '</p>';
             detailsEl.innerHTML = html;
             detailsEl.style.display = 'block';
@@ -774,6 +811,61 @@ function loadSubscriptionHealth() {
 }
 
 // ---- Event Bus ----
+// ---- Topic Matrix (cross-plugin communication graph) ----
+function matrixStatusPill(st) {
+    var map = {
+        flowing:          ['#28a745', 'flowing'],
+        wired_idle:       ['#3b82f6', 'wired, idle'],
+        orphan_publisher: ['#f59e0b', 'no subscribers'],
+        failing:          ['#ef4444', 'failing'],
+        dormant:          ['#6c757d', 'dormant']
+    };
+    var m = map[st] || ['#6c757d', st];
+    return '<span style="display:inline-block;padding:1px 8px;border-radius:3px;font-size:0.72rem;font-weight:700;background:' + m[0] + '22;color:' + m[0] + ';border:1px solid ' + m[0] + '55;">' + m[1] + '</span>';
+}
+
+function loadIntegrationMatrix() {
+    document.getElementById('matrix-results').innerHTML = '<div class="empty-state"><span class="spinner-sm"></span> Building matrix...</div>';
+    fetchJson(baseUrl + '/integration-matrix').then(data => {
+        if (!data.success) {
+            document.getElementById('matrix-results').innerHTML = resultCard('danger', 'Error', '<p>' + (data.message || 'Failed') + '</p>');
+            return;
+        }
+        const d = data.data;
+        const sum = d.summary || {};
+        let chips = '<div style="margin-bottom:12px;line-height:2;">'
+            + matrixStatusPill('flowing') + ' ' + (sum.flowing || 0) + ' &nbsp; '
+            + matrixStatusPill('wired_idle') + ' ' + (sum.wired_idle || 0) + ' &nbsp; '
+            + matrixStatusPill('orphan_publisher') + ' ' + (sum.orphan_publisher || 0) + ' &nbsp; '
+            + matrixStatusPill('failing') + ' ' + (sum.failing || 0) + ' &nbsp; '
+            + matrixStatusPill('dormant') + ' ' + (sum.dormant || 0)
+            + '</div>';
+        let rows = (d.rows || []).map(r => {
+            var subs = (r.subscribers && r.subscribers.length) ? r.subscribers.join(', ') : '<em style="color:#8b95a5;">none</em>';
+            return '<tr>'
+                + '<td><code>' + r.topic + '</code></td>'
+                + '<td>' + r.publisher + '</td>'
+                + '<td>' + subs + '</td>'
+                + '<td>' + (r.last_published || '<span style="color:#8b95a5;">never</span>') + '</td>'
+                + '<td>' + (r.last_delivered || '<span style="color:#8b95a5;">&mdash;</span>') + '</td>'
+                + '<td>' + matrixStatusPill(r.status) + '</td>'
+                + '</tr>';
+        }).join('');
+        let legend = '<p style="font-size:0.78rem;color:#8b95a5;margin-top:8px;">'
+            + '<strong>flowing</strong> = clean delivery to a subscriber on record &middot; '
+            + '<strong>wired, idle</strong> = subscribed but no successful delivery yet (never published, or the events on record predate the subscription, e.g. fired once before the consumer was installed) &middot; '
+            + '<strong>no subscribers</strong> = published but nobody listens (often a publisher that shipped ahead of its consumer) &middot; '
+            + '<strong>failing</strong> = an actual failed dispatch on record (not just a missing delivery) &middot; '
+            + '<strong>dormant</strong> = registered, never published</p>';
+        document.getElementById('matrix-results').innerHTML = chips
+            + resultCard('info', 'Topic Matrix (' + d.total + ' topics)',
+                '<table class="diag-table"><tr><th>Topic</th><th>Publisher</th><th>Subscriber(s)</th><th>Last published</th><th>Last delivered</th><th>Status</th></tr>'
+                + rows + '</table>' + legend);
+    }).catch(e => {
+        document.getElementById('matrix-results').innerHTML = resultCard('danger', 'Error', '<p>' + e.message + '</p>');
+    });
+}
+
 function loadEventBus() {
     document.getElementById('event-results').innerHTML = '<div class="empty-state"><span class="spinner-sm"></span> Loading...</div>';
 

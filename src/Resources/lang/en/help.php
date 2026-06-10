@@ -5,6 +5,7 @@ return [
     'help_documentation' => 'Help & Documentation',
     'search_placeholder' => 'Search documentation...',
     'overview' => 'Overview',
+    'plugin_family' => 'The Plugin Family',
     'pricing_service' => 'Pricing Service',
     'appraisal_system' => 'Appraisal System',
     'plugin_bridge' => 'Plugin Bridge',
@@ -398,6 +399,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'topics_registry_intro' => 'Use <code>\\ManagerCore\\Topics::all()</code> at runtime to enumerate all topics. The registered set right now:',
     'topics_registry_list' => '<ul>
         <li><strong>mining.*</strong> (13 topics) — tax_created, tax_paid, tax_overdue, invoice_sent, theft_detected, jackpot_detected, session_started/_ended, event_created/_started/_completed, report_generated, moon_extraction_ready</li>
+        <li><strong>mining.extraction_*</strong> (3 topics, MM v2.0.1+) — <code>extraction_ready</code>, <code>extraction_unstable</code>, <code>extraction_expired</code>. SeAT Broadcast subscribes to surface mining ops on the FC Opportunities board.</li>
         <li><strong>structure.alert.*</strong> (9 topics)
             <ul>
                 <li>Reinforcement timer ladder: <code>shield_reinforced</code>, <code>armor_reinforced</code>, <code>hull_reinforced</code>, <code>destroyed</code></li>
@@ -405,8 +407,12 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
                 <li>Tactical planning (added 2026-05): <code>anchoring_started</code>, <code>sov_reinforced</code>, <code>entosis_in_progress</code> — each carries a <code>timer_ends_at</code> field so consumers can render planning calendars or schedule pre-timer pings</li>
             </ul>
         </li>
-        <li><strong>wallet.transaction_detected</strong> — Corp Wallet Manager (future)</li>
-        <li><strong>buyback.completed</strong> — Buyback Manager (future)</li>
+        <li><strong>wallet.*</strong> (3 topics) — <code>wallet.transaction_detected</code>, <code>wallet.balance_low</code>, and <code>wallet.unusual_recipient_detected</code> (added v1.0.1 — subscribed by HR Manager for assessment-cache nudges + audit trail). All published by Corp Wallet Manager.</li>
+        <li><strong>member.*</strong> (4 topics) — CWM publishes per-member milestone transitions: <code>member.contribution.stalled</code>, <code>member.contribution.milestone</code>, <code>member.contribution.drop_detected</code> (added v1.0.1), <code>member.tax.compliance_dropped</code>. HR Manager subscribes to all four for the player classifier.</li>
+        <li><strong>hr.player.milestone_reached</strong> (added v1.0.1) — HR Manager publishes when a tracked player crosses a contribution ladder rung, computed across alts. Ready for SeAT Broadcast to subscribe and route to a promotion channel.</li>
+        <li><strong>pings.broadcast.sent</strong> + <strong>pings.formup.scheduled</strong> — SeAT Broadcast publishes these so other plugins can detect "who\'s acting as an active FC" without peeking at Broadcast\'s tables. No live subscribers yet.</li>
+        <li><strong>buyback.completed</strong> — Buyback Manager publishes when a buyback completes. No live subscribers yet.</li>
+        <li><strong>pricing.preference_changed</strong> — Manager Core publishes when an operator updates a row in Pricing Preferences. Mining Manager subscribes to flush its local price cache.</li>
     </ul>',
     'topics_registry_note' => 'Topics that exist in the registry but have no publisher yet are intentional pre-registration — adding a publish call later requires zero MC change. Adding a NEW topic = one entry in <code>Topics::registry()</code>.',
     'topics_extras_title' => 'Idempotency, visibility, sanitization (handled automatically)',
@@ -650,6 +656,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
         <tr><td style="padding: 8px;"><code>price_cron_overdue</code></td><td style="padding: 8px;">Newest cached price is older than 2× the scheduled refresh interval. Indicates SeAT scheduler is dead, the update-prices command is throwing, or all providers are unreachable.</td></tr>
         <tr><td style="padding: 8px;"><code>esi_fast_poll_failing</code></td><td style="padding: 8px;">≥80% of enabled ESI key holders have a non-success <code>last_poll_status</code>. CCP outage, every director\'s token expired simultaneously, or pool fully exhausted. Skipped when pool has &lt;3 enabled keys (single-key issues are operator-level).</td></tr>
         <tr><td style="padding: 8px;"><code>provider_unavailable</code></td><td style="padding: 8px;">Any price provider configured on an enabled market reports <code>isAvailable=false</code>. Typically missing credentials (Janice API key, SeAT prices-core sub-provider) for a provider you\'ve assigned to a market.</td></tr>
+        <tr><td style="padding: 8px;"><code>plugin_updates_available</code></td><td style="padding: 8px;">Any plugin in the suite has a new tagged release on Packagist that this install hasn\'t picked up yet. Batched alert lists every outdated plugin in one message; clickable title deep-links to MC → Plugin Bridge. <strong>7-day per-(plugin, version) cooldown</strong>, not the standard 1h — same release won\'t spam, but a NEW version cuts the cooldown immediately so you hear about it the next tick.</td></tr>
     </table>',
 
     'watchdog_dedup_title' => 'Deduplication',
@@ -668,6 +675,27 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'watchdog_limitations_body' => '<ul>
         <li>Watchdog itself depends on Redis (for dedup) + the SeAT scheduler running its cron. If those are down, Watchdog won\'t fire — but neither will anything else in SeAT, so you\'ll notice via other paths.</li>
         <li>The webhook URL is stored in the <code>manager_core_settings</code> table; treat the table as sensitive in your DB backups.</li>
-        <li>Discord/Slack auto-detect by URL pattern. Custom webhooks (Mattermost, generic JSON receivers) are not supported in v1.0.0 — open an issue if you need this.</li>
+        <li>Discord/Slack auto-detect by URL pattern. Custom webhooks (Mattermost, generic JSON receivers) are not supported in v1.0.x — open an issue if you need this.</li>
     </ul>',
+
+    // What\'s New in v1.0.1 — upgrade highlights box that sits under the
+    // creator note on the Overview page. Polish pass on top of v1.0.0;
+    // three operator-relevant additions.
+    'whats_new_v101_title' => 'What\'s New in v1.0.1',
+    'whats_new_v101_intro' => 'Polish pass on top of v1.0.0. Two themes: a major accuracy pass on the Plugin Bridge so the ecosystem map honestly reflects what\'s wired to what, and a Topics registry expansion so every event the suite publishes is first-class. Plus a new Watchdog check, a cross-plugin Topic Matrix, and an interactive ecosystem map.',
+    'whats_new_v101_list' => '<ul>
+        <li><strong>Plugin Bridge state accuracy.</strong>
+            The ecosystem map, Plugin Registry, Plugin Connections tab, and CLI now all agree on each plugin\'s real state. The bridge counts a new <code>feeds N</code> signal (does anyone subscribe to what I publish?), so rare-event publishers (Corp Wallet Manager, Blueprint Manager) correctly show <em>Partial</em> instead of looking unwired just because their events fire infrequently. The Plugin Connections tab no longer mislabels non-pricing plugins as "installed", self-registration can\'t downgrade a discovered plugin, and the "standalone" wording now explains a plugin is integration-capable (not broken) when it\'s configured to run on its own.</li>
+        <li><strong>Topics registry expanded to 59 entries.</strong>
+            29 new events registered this version: Corp Wallet Manager\'s 4 <code>member.*</code> milestones, HR Manager\'s full 18-event lifecycle (<code>hr.application.*</code> / classifier flags / <code>hr.purge.*</code>), Blueprint Manager\'s 4 <code>blueprint.request.*</code> events, plus three audit gap-closers (<code>member.contribution.drop_detected</code>, <code>wallet.unusual_recipient_detected</code>, <code>hr.player.milestone_reached</code>). Each gets required-field validation, an idempotency template, and visibility in MC\'s tooling: the same first-class treatment every other event already had.</li>
+        <li><strong>Topic Matrix (Diagnostics &rarr; Event Bus).</strong>
+            The cross-plugin communication graph in one table. For every registered topic it shows the publisher, the subscribers, the last published / last delivered timestamps, and a status: <em>flowing</em> (delivered to a subscriber), <em>wired, idle</em> (subscribed but no traffic yet, normal for rare events), <em>no subscribers</em> (published but nobody listens), <em>failing</em> (an actual failed dispatch on record), or <em>dormant</em> (registered, never published). Answers "is my ecosystem actually talking?" without cross-referencing two separate lists.</li>
+        <li><strong>New Watchdog check: <code>plugin_updates_available</code>.</strong>
+            Fires when any plugin in the suite has a new tagged release on Packagist that this install hasn\'t picked up yet. Batched alert lists every outdated plugin in one Discord/Slack embed; the title deep-links to <strong>MC &rarr; Plugin Bridge</strong>. <strong>7-day per-(plugin, version) cooldown</strong> so the same release won\'t spam, but a new version cuts the cooldown immediately. Enabled by default; toggle on <em>Settings &rarr; Watchdog</em> or preview the alert format on <em>Diagnostics &rarr; Notification Testing</em>.</li>
+        <li><strong>Interactive ecosystem map.</strong>
+            The <em>Help &rarr; The Plugin Family</em> section has a "what would I lose without X" map: hover any plugin to highlight its connections, see which family + external plugins it talks to, and watch lost connections go red. A companion Ecosystem Simulation tab on the Plugin Bridge page previews the same view.</li>
+        <li><strong>Fixes.</strong>
+            Corp Wallet Manager\'s <code>member.*</code> events were being rejected at the publish gate (the allow-list only granted it <code>wallet.</code>), now fixed so HR\'s wallet-signal subscriptions actually fire. CWM\'s Plugin Bridge config special-case was reverted now that CWM v3.0.0 matches the suite namespace convention. The CREATE migrations gained <code>hasTable</code> guards so the whole set is safely re-runnable.</li>
+    </ul>',
+    'whats_new_v101_upgrade_note' => 'No new tables or schema changes (the existing CREATE migrations just gained <code>hasTable</code> guards), fully backward-compatible. Standard SeAT-Docker stack-down/stack-up recipe to upgrade; full notes in CHANGELOG.MD on the GitHub repo.',
 ];

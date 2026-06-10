@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Log;
 use ManagerCore\Models\Setting;
 use ManagerCore\Services\Watchdog\Checks\EsiFastPollFailingCheck;
 use ManagerCore\Services\Watchdog\Checks\EventBusFailuresCheck;
+use ManagerCore\Services\Watchdog\Checks\PluginUpdatesAvailableCheck;
 use ManagerCore\Services\Watchdog\Checks\PriceCronOverdueCheck;
 use ManagerCore\Services\Watchdog\Checks\ProviderUnavailableCheck;
 
@@ -51,12 +52,13 @@ class WatchdogService
     {
         // Hardcoded check registry — could be made discoverable later if
         // we ever want plugins to contribute their own checks, but for
-        // v1.0.0 the four MC-internal checks are all we have.
+        // v1.0.0 the five MC-internal checks are all we have.
         $this->checks = [
             new EventBusFailuresCheck(),
             new PriceCronOverdueCheck(),
             new EsiFastPollFailingCheck(),
             new ProviderUnavailableCheck(),
+            new PluginUpdatesAvailableCheck(),
         ];
     }
 
@@ -127,10 +129,24 @@ class WatchdogService
             // Dedup — has this check already fired in the dedup window?
             // Dry-run still respects dedup so the operator sees the same
             // skip-counts they'd get from a real run.
-            $dedupKey = 'mc:watchdog:dedup:' . $check->name();
-            if (Cache::has($dedupKey)) {
+            //
+            // Two dedup models:
+            //   (a) Default — one key per check, 1h TTL. Used when the
+            //       check returns an alert without a 'dedup_keys' field.
+            //       Same condition keeps re-firing → silent until the
+            //       key expires.
+            //   (b) Custom — multiple per-item keys with their own TTLs.
+            //       Used when the check pre-filters its results (e.g.
+            //       PluginUpdatesAvailableCheck dedupes per (plugin,
+            //       version) with a 7-day TTL). The check has already
+            //       done the filtering work, so we skip the default
+            //       check and use the per-item keys it provided.
+            $customDedupKeys = $alert['dedup_keys'] ?? null;
+            $defaultDedupKey = 'mc:watchdog:dedup:' . $check->name();
+
+            if ($customDedupKeys === null && Cache::has($defaultDedupKey)) {
                 $summary['alerts_skipped_dedup']++;
-                Log::debug('[MC Watchdog] Skipped alert (dedup window active): ' . $check->name());
+                Log::debug('[MC Watchdog] Skipped alert (default dedup window active): ' . $check->name());
                 continue;
             }
 
@@ -142,7 +158,17 @@ class WatchdogService
             } else {
                 $delivered = $this->deliver($webhookUrl, $check, $alert);
                 if ($delivered) {
-                    Cache::put($dedupKey, Carbon::now()->toIso8601String(), self::DEDUP_TTL_SECONDS);
+                    if ($customDedupKeys !== null) {
+                        // Set every per-item dedup key the check provided.
+                        // Each carries its own TTL (e.g. 7 days for
+                        // plugin_updates_available).
+                        foreach ($customDedupKeys as $kv) {
+                            if (!isset($kv['key'], $kv['ttl'])) continue;
+                            Cache::put((string) $kv['key'], Carbon::now()->toIso8601String(), (int) $kv['ttl']);
+                        }
+                    } else {
+                        Cache::put($defaultDedupKey, Carbon::now()->toIso8601String(), self::DEDUP_TTL_SECONDS);
+                    }
                     $summary['alerts_fired']++;
                 } else {
                     $summary['delivery_errors']++;
@@ -286,6 +312,30 @@ class WatchdogService
                             'providers_in_use' => 'fuzzwork, janice, goonpraisal',
                             'note' => 'SAMPLE — not a real condition',
                         ],
+                    ],
+                ];
+
+            case 'plugin_updates_available':
+                // Try to resolve the real Plugin Bridge URL so the sample
+                // demonstrates the clickable-title behavior end-to-end.
+                $bridgeUrl = null;
+                try { $bridgeUrl = route('manager-core.bridge.index'); } catch (\Throwable $e) {}
+
+                return [
+                    'label' => 'Plugin updates available (sample)',
+                    'alert' => [
+                        'title' => 'Plugin updates available (sample)',
+                        'message' => "SAMPLE: 3 plugin updates available on Packagist:\n• Mining Manager  2.0.0 → 2.0.1\n• Structure Manager  2.0.0 → 2.0.1\n• SeAT Broadcast  1.0.6 → 2.0.0\n\nSee MC → Plugin Bridge for the full version status.",
+                        'severity' => 'warning',
+                        'context' => [
+                            'update_count' => 3,
+                            'plugins' => 'mining-manager, structure-manager, seat-discord-pings',
+                            'note' => 'SAMPLE — not a real condition',
+                        ],
+                        // Sample does NOT include dedup_keys — that prevents
+                        // the simulate path from setting any 7-day keys
+                        // and accidentally suppressing a real alert later.
+                        'embed_url' => $bridgeUrl,
                     ],
                 ];
         }
@@ -467,17 +517,23 @@ class WatchdogService
                 'inline' => true,
             ];
         }
+        $embed = [
+            'title'       => '[MC Watchdog] ' . ($alert['title'] ?? $check->label()),
+            'description' => $alert['message'] ?? '(no message)',
+            'color'       => $color,
+            'fields'      => $fields,
+            'footer'      => [
+                'text' => 'check=' . $check->name() . ' · ' . Carbon::now()->toIso8601String(),
+            ],
+        ];
+        // embed.url makes the title clickable (Discord renders it as a link).
+        // Used by plugin_updates_available to deep-link to MC → Plugin Bridge.
+        if (!empty($alert['embed_url'])) {
+            $embed['url'] = (string) $alert['embed_url'];
+        }
         return [
             'username' => 'MC Watchdog',
-            'embeds' => [[
-                'title'       => '[MC Watchdog] ' . ($alert['title'] ?? $check->label()),
-                'description' => $alert['message'] ?? '(no message)',
-                'color'       => $color,
-                'fields'      => $fields,
-                'footer'      => [
-                    'text' => 'check=' . $check->name() . ' · ' . Carbon::now()->toIso8601String(),
-                ],
-            ]],
+            'embeds' => [$embed],
         ];
     }
 
@@ -497,17 +553,23 @@ class WatchdogService
                 'short' => true,
             ];
         }
+        $attachment = [
+            'fallback' => '[MC Watchdog] ' . ($alert['title'] ?? $check->label()) . ': ' . ($alert['message'] ?? ''),
+            'color'    => $color,
+            'title'    => '[MC Watchdog] ' . ($alert['title'] ?? $check->label()),
+            'text'     => $alert['message'] ?? '(no message)',
+            'fields'   => $fields,
+            'footer'   => 'check=' . $check->name(),
+            'ts'       => time(),
+        ];
+        // title_link makes the title clickable on Slack — same role as
+        // embed.url on Discord.
+        if (!empty($alert['embed_url'])) {
+            $attachment['title_link'] = (string) $alert['embed_url'];
+        }
         return [
             'username' => 'MC Watchdog',
-            'attachments' => [[
-                'fallback' => '[MC Watchdog] ' . ($alert['title'] ?? $check->label()) . ': ' . ($alert['message'] ?? ''),
-                'color'    => $color,
-                'title'    => '[MC Watchdog] ' . ($alert['title'] ?? $check->label()),
-                'text'     => $alert['message'] ?? '(no message)',
-                'fields'   => $fields,
-                'footer'   => 'check=' . $check->name(),
-                'ts'       => time(),
-            ]],
+            'attachments' => [$attachment],
         ];
     }
 }

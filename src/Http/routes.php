@@ -313,6 +313,11 @@ Route::group([
             'uses' => 'DiagnosticController@eventBusHealth',
         ]);
 
+        Route::get('/integration-matrix', [
+            'as'   => 'manager-core.diagnostic.integration-matrix',
+            'uses' => 'DiagnosticController@integrationMatrix',
+        ]);
+
         Route::get('/capabilities', [
             'as'   => 'manager-core.diagnostic.capabilities',
             'uses' => 'DiagnosticController@capabilitiesOverview',

@@ -29,6 +29,44 @@
         min-width: 0;
     }
 
+    /* Green upgrade-highlights box used by the "What's New in vX.Y.Z" section
+       that sits right under the creator note. Mirrors SM's .whats-new-box
+       (suite-wide convention — same green-gradient, same border-left, same
+       heading color) so the page feels consistent with the other plugins. */
+    .whats-new-box {
+        background: linear-gradient(135deg, rgba(40, 167, 69, 0.15) 0%, rgba(32, 201, 151, 0.1) 100%);
+        border-left: 4px solid #28a745;
+        border-radius: 8px;
+        padding: 15px 20px;
+        margin: 20px 0;
+        color: #d1d5db !important;
+    }
+    .whats-new-box h4,
+    .whats-new-box h5 {
+        color: #51cf66 !important;
+        margin-top: 0;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .whats-new-box ul {
+        margin: 8px 0;
+        padding-left: 20px;
+        color: #d1d5db !important;
+    }
+    .whats-new-box li {
+        margin-bottom: 6px;
+        color: #d1d5db !important;
+    }
+    .whats-new-box code {
+        background: rgba(0, 0, 0, 0.3);
+        color: #fbbf24 !important;
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 0.88rem;
+    }
+
     /* Red banner used by the "A note from the author" section that warns
        operators about MC's cross-plugin impact + recommended access model.
        Stronger visual treatment than the canonical .warning-box (yellow)
@@ -121,6 +159,12 @@
                             <a href="#" class="nav-link active" data-section="overview">
                                 <i class="fas fa-info-circle"></i>
                                 {{ trans('manager-core::help.overview') }}
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-section="ecosystem">
+                                <i class="fas fa-sitemap"></i>
+                                {{ trans('manager-core::help.plugin_family') }}
                             </a>
                         </li>
                         <li class="nav-item">
@@ -377,6 +421,24 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <div class="signature">{{ trans('manager-core::help.creator_note_signature') }}</div>
                 </div>
 
+                {{-- What's New in v1.0.1 — upgrade highlights box. Sits under
+                     the creator note so operators upgrading from v1.0.0 land
+                     on the delta-from-the-foundation-release callout before
+                     diving into the broader plugin description below. Uses
+                     the suite-wide .whats-new-box style (mirrors SM/MM). --}}
+                <div class="whats-new-box">
+                    <h4>
+                        <i class="fas fa-sparkles"></i>
+                        {{ trans('manager-core::help.whats_new_v101_title') }}
+                    </h4>
+                    <p>{!! trans('manager-core::help.whats_new_v101_intro') !!}</p>
+                    {!! trans('manager-core::help.whats_new_v101_list') !!}
+                    <p style="margin-top: 12px; margin-bottom: 0; font-size: 0.88rem; color: #8b95a5;">
+                        <i class="fas fa-info-circle"></i>
+                        {!! trans('manager-core::help.whats_new_v101_upgrade_note') !!}
+                    </p>
+                </div>
+
                 {{-- What is Manager Core? --}}
                 <div class="help-card">
                     <h3>
@@ -461,6 +523,94 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         </a>
                         @endcan
                     </div>
+                </div>
+            </div>
+
+            {{-- The Plugin Family / Ecosystem Section --}}
+            <div id="ecosystem" class="help-section">
+                <style>
+                    #ecosystem .family-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+                    #ecosystem .family-table th { text-align: left; padding: 8px 10px; color: #c7d2fe; border-bottom: 2px solid #3a4049; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.4px; }
+                    #ecosystem .family-table td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); color: #d1d5db; vertical-align: top; font-size: 0.88rem; line-height: 1.45; }
+                    #ecosystem .family-table tr:last-child td { border-bottom: none; }
+                    #ecosystem .family-table td strong { color: #e2e8f0; }
+                    #ecosystem .family-table tr.is-core td { background: rgba(102, 126, 234, 0.08); }
+                </style>
+
+                <div class="help-card">
+                    <h3><i class="fas fa-sitemap"></i> The plugin family</h3>
+                    <p>Manager Core is the optional hub of a family of SeAT plugins built to work together. Each one is genuinely useful on its own, but when Manager Core is installed they start sharing data, events and prices through it. Manager Core has no corporation features of its own; it is the wiring the others plug into.</p>
+                    <div class="info-box">
+                        <i class="fas fa-lightbulb"></i>
+                        <strong>The one idea to remember:</strong> every plugin works standalone, so Manager Core is never required. It is a multiplier &mdash; the more of the family you run, the more it does for you. Install only what you need.
+                    </div>
+                </div>
+
+                {{-- Interactive ecosystem map: click a plugin to imagine it
+                     absent and see what the rest of the suite loses. Pure
+                     vanilla JS + SVG, self-contained, enhancement-only. --}}
+                <div class="help-card">
+                    <h3><i class="fas fa-project-diagram"></i> Interactive map &mdash; what would I lose without &hellip;?</h3>
+                    @include('manager-core::partials._ecosystem_map')
+                </div>
+
+                <div class="help-card">
+                    <h3><i class="fas fa-th-large"></i> The plugins</h3>
+                    <table class="family-table">
+                        <thead>
+                            <tr><th>Plugin</th><th>What it does</th><th>How it uses Manager Core</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr class="is-core"><td><strong>Manager Core</strong></td><td>The hub. Pricing, the EventBus, the Plugin Bridge, shared SDE lookups and a shared fast-polling ESI key pool.</td><td>It <em>is</em> the hub.</td></tr>
+                            <tr><td><strong>Mining Manager</strong></td><td>Mining tax, ledger, moon extraction monitoring and theft detection.</td><td>Centralised ore pricing; publishes tax / theft / extraction events; subscribes to structure alerts.</td></tr>
+                            <tr><td><strong>Structure Manager</strong></td><td>Upwell + POS fuel, reinforcement timers, attack alerts and fuel-theft forensics.</td><td>Shared fast ESI polling; publishes structure-alert and timer events for others to react to.</td></tr>
+                            <tr><td><strong>Corp Wallet Manager</strong></td><td>Corporation wallet analytics and predictions.</td><td>Exposes member contribution / ratting / tax stats as bridge capabilities; publishes wallet signals.</td></tr>
+                            <tr><td><strong>Buyback Manager</strong></td><td>Corp buyback programme: appraise, offer, contract.</td><td>Uses Manager Core pricing for appraisals; publishes buyback lifecycle events.</td></tr>
+                            <tr><td><strong>Blueprint Manager</strong></td><td>Corporation blueprint library and copy-request workflow.</td><td>Publishes request lifecycle events; exposes per-member and per-corp request stats as capabilities.</td></tr>
+                            <tr><td><strong>HR Manager</strong></td><td>Recruitment funnel and director assessment / retention.</td><td>The biggest consumer: subscribes to mining, wallet, broadcast and blueprint events to build a per-member picture, and exposes assessment capabilities of its own.</td></tr>
+                            <tr><td><strong>SeAT Broadcast</strong></td><td>Discord broadcasts, a fleet calendar and an FC opportunities board.</td><td>Subscribes to structure timers and mining extractions to fill its calendar; publishes broadcast events.</td></tr>
+                            <tr><td><strong>Industry Manager</strong></td><td>Industry / blueprint calculator and planetary industry.</td><td>Planned: Manager Core pricing for build-vs-buy.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="help-card">
+                    <h3><i class="fas fa-plug"></i> External SeAT plugins we plug into</h3>
+                    <p>The suite is a good citizen of the wider SeAT ecosystem: a few features build on popular third-party plugins when they're installed, and degrade gracefully when they're not.</p>
+                    <table class="family-table">
+                        <thead>
+                            <tr><th>Plugin</th><th>What it is</th><th>What the family uses it for</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><strong>SeAT Connector</strong><br><small style="color: #8b95a5;">warlof/seat-connector</small></td><td>Links SeAT accounts to Discord / Slack identities and assigns roles.</td><td>HR Manager pushes recruits into Discord roles through squads and reads Discord-role-based activity tiers; the Discord role pickers across the suite read its role list.</td></tr>
+                            <tr><td><strong>SeAT Fitting</strong><br><small style="color: #8b95a5;">eveseat/fitting</small></td><td>Manages ship fittings and doctrines.</td><td>SeAT Broadcast attaches fitting doctrines to fleet broadcasts.</td></tr>
+                            <tr><td><strong>seat-prices</strong><br><small style="color: #8b95a5;">pricing providers</small></td><td>Community price-source plugins for SeAT.</td><td>Manager Core can chain a seat-prices provider into its pricing as an optional source.</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="info-box">
+                        <i class="fas fa-shield-alt"></i>
+                        <strong>Same rule applies:</strong> none of these are required. Each is detected at runtime, and the feature that uses it simply isn't offered when it's absent (the Discord pickers fall back to manual role IDs, broadcasts skip doctrines, pricing uses its other sources).
+                    </div>
+                </div>
+
+                <div class="help-card">
+                    <h3><i class="fas fa-plug"></i> How they connect</h3>
+                    <p>Manager Core offers the family a small set of shared rails. A plugin opts into whichever ones it needs and ignores the rest:</p>
+                    <ul>
+                        <li><strong>EventBus</strong> &mdash; a plugin publishes an event (a tax invoice, a structure timer, a blueprint request) and other plugins subscribe and react. See the EventBus and Topics sections.</li>
+                        <li><strong>Plugin Bridge</strong> &mdash; a plugin exposes named capabilities that others call on demand, e.g. "give me this member's contribution summary". See the Plugin Bridge section.</li>
+                        <li><strong>Pricing</strong> &mdash; one price source for the whole suite, so ore, buyback and industry all value items the same way.</li>
+                        <li><strong>SDE + ESI</strong> &mdash; shared type lookups and a shared fast-polling ESI key pool, so plugins don't each reinvent them.</li>
+                    </ul>
+                    @can('manager-core.bridge.view')
+                    <div class="success-box">
+                        <i class="fas fa-project-diagram"></i>
+                        <div>
+                            <strong>See it live:</strong>
+                            the <a href="{{ route('manager-core.bridge.index') }}" style="color: #6ee7b7;">Plugin Bridge</a> page shows every detected plugin, what each has wired, and the events flowing right now.
+                        </div>
+                    </div>
+                    @endcan
                 </div>
             </div>
 

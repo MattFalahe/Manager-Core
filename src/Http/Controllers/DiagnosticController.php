@@ -140,6 +140,9 @@ class DiagnosticController extends Controller
             'capabilities' => [],
             'subscription_count' => 0,
             'status' => 'not_installed',
+            'state' => null,
+            'state_reason' => null,
+            'integration' => [],
             'issues' => [],
         ];
 
@@ -159,15 +162,32 @@ class DiagnosticController extends Controller
                 $result['issues'][] = 'Plugin installed but not registered with Plugin Bridge';
                 $result['status'] = 'installed';
             } else {
+                // Status + granular 6-state come straight from the Plugin
+                // Bridge, which is the single source of truth. The bridge
+                // already weighs every integration channel (pricing subs,
+                // event subs, ESI handlers, recent publishing, and outbound
+                // publish relationships) to arrive at full/partial/discovered/
+                // standalone. Do NOT recompute status here from pricing
+                // subscriptions alone — that's the pre-6-state logic that
+                // wrongly forced any plugin without a pricing sub (CWM, SM,
+                // HR, SeAT Broadcast, Blueprint) back to "installed" even
+                // when it was actively integrating via events/capabilities.
                 $result['status'] = $bridgePlugin['status'] ?? 'installed';
+                $result['state'] = $bridgePlugin['state'] ?? null;
+                $result['state_reason'] = $bridgePlugin['state_reason'] ?? null;
+                $result['integration'] = $bridgePlugin['integration'] ?? [];
             }
 
-            // Check subscriptions
+            // Pricing-subscription count. Informational only — surfaced in the
+            // details panel, NOT used to drive the status badge. Only the
+            // plugins with a subscription_name (Mining Manager, Buyback
+            // Manager) route pricing through type-ID subscriptions; the rest
+            // integrate via other channels and legitimately have zero here.
             $subName = $config['subscription_name'] ?? null;
             if ($subName) {
                 $result['subscription_count'] = TypeSubscription::where('plugin_name', $subName)->count();
                 if ($result['subscription_count'] === 0) {
-                    $result['issues'][] = 'No type subscriptions registered — plugin may not be using Manager Core pricing';
+                    $result['issues'][] = 'No pricing type subscriptions registered — this plugin is configured to use Manager Core pricing but has not subscribed any type IDs yet.';
                 }
             }
 
@@ -176,10 +196,6 @@ class DiagnosticController extends Controller
             if ($registry) {
                 $result['capabilities'] = $registry->capabilities ?? [];
                 $result['last_seen'] = $registry->last_seen_at ? $registry->last_seen_at->diffForHumans() : 'Never';
-            }
-
-            if (empty($result['issues'])) {
-                $result['status'] = $result['subscription_count'] > 0 ? 'active' : 'installed';
             }
         }
 
@@ -590,6 +606,150 @@ class DiagnosticController extends Controller
                 }),
             ],
         ]);
+    }
+
+    /**
+     * GET /diagnostic/integration-matrix — the cross-plugin communication graph.
+     *
+     * Joins the three data sources MC already has into one topic-centric view
+     * so an operator can answer "is my ecosystem actually talking?" at a glance,
+     * instead of mentally cross-referencing the subscriptions list against the
+     * recent-events list:
+     *
+     *   - Topics::all()                       → who PUBLISHES each topic
+     *   - manager_core_event_subscriptions    → who SUBSCRIBES (wildcard-matched
+     *                                            with fnmatch, the same matcher
+     *                                            EventBus uses to dispatch)
+     *   - manager_core_event_log              → last published + last delivered
+     *
+     * Status per topic:
+     *   flowing          — has subscribers AND a clean delivery on record
+     *   wired_idle       — has subscribers but no successful delivery on record
+     *                      yet. Either never published, OR the publishes that
+     *                      exist predate the subscription / reached zero
+     *                      subscribers at the time (e.g. the event fired once
+     *                      before the consumer plugin was installed, and hasn't
+     *                      fired since). Benign — normal for rare events like
+     *                      member milestones / blueprint requests.
+     *   failing          — there is an ACTUAL failed dispatch on record
+     *                      (status 'failed' / 'partial_failure') that hasn't been
+     *                      superseded by a later clean delivery. This is the only
+     *                      "something is broken" state — absence of a delivery
+     *                      record alone is NOT failing (that's wired_idle).
+     *   orphan_publisher — fires but nobody subscribes (often intentional
+     *                      forward-registration; the publish side shipped first)
+     *   dormant          — registered in Topics but never published, no subscribers
+     */
+    public function integrationMatrix(): JsonResponse
+    {
+        try {
+            // 1. Registry: topic => publisher (+ metadata we don't need here)
+            $registry = \ManagerCore\Topics::all();
+
+            // 2. Active subscriptions (pattern strings, wildcard or exact)
+            $subs = DB::table('manager_core_event_subscriptions')
+                ->where('is_active', true)
+                ->get(['subscriber_plugin', 'event_pattern']);
+
+            // 3. event_log aggregates per event_name. Three distinct signals so
+            //    we don't mistake "reached nobody" for "delivery failed":
+            //    - last_published : most recent publish of any kind
+            //    - last_delivered : most recent CLEAN dispatch that reached ≥1
+            //                       subscriber (status 'dispatched', count > 0).
+            //                       A publish that reached zero subscribers
+            //                       (count = 0, e.g. fired before the consumer
+            //                       was subscribed) is NOT a delivery.
+            //    - last_failure   : most recent ACTUAL failure (status 'failed'
+            //                       or 'partial_failure'). This is what drives
+            //                       the 'failing' classification — not the mere
+            //                       absence of a delivery record.
+            $logAgg = DB::table('manager_core_event_log')
+                ->select(
+                    'event_name',
+                    DB::raw('MAX(created_at) as last_published'),
+                    DB::raw("MAX(CASE WHEN status = 'dispatched' AND subscriber_count > 0 THEN created_at ELSE NULL END) as last_delivered"),
+                    DB::raw("MAX(CASE WHEN status IN ('failed', 'partial_failure') THEN created_at ELSE NULL END) as last_failure")
+                )
+                ->groupBy('event_name')
+                ->get()
+                ->keyBy('event_name');
+
+            $rows = [];
+            $summary = ['flowing' => 0, 'wired_idle' => 0, 'failing' => 0, 'orphan_publisher' => 0, 'dormant' => 0];
+
+            foreach ($registry as $topic => $meta) {
+                $publisher = is_array($meta) ? ($meta['publisher'] ?? 'unknown') : 'unknown';
+
+                // Match subscribers via fnmatch (member.* matches member.contribution.*).
+                // Exclude a plugin subscribing to its own published topic — that
+                // isn't a cross-plugin link.
+                $subscribers = [];
+                foreach ($subs as $s) {
+                    if ($s->subscriber_plugin === $publisher) {
+                        continue;
+                    }
+                    if (@fnmatch((string) $s->event_pattern, (string) $topic)) {
+                        $subscribers[$s->subscriber_plugin] = true;
+                    }
+                }
+                $subscribers = array_keys($subscribers);
+
+                $log = $logAgg[$topic] ?? null;
+                $lastPublished = $log->last_published ?? null;
+                $lastDelivered = $log->last_delivered ?? null;
+                $lastFailure   = $log->last_failure ?? null;
+
+                if (empty($subscribers)) {
+                    $status = $lastPublished ? 'orphan_publisher' : 'dormant';
+                } elseif ($lastFailure !== null && ($lastDelivered === null || $lastFailure >= $lastDelivered)) {
+                    // A genuine failed/partial dispatch that a later clean
+                    // delivery hasn't superseded. Datetime strings compare
+                    // chronologically (YYYY-MM-DD HH:MM:SS). This is the ONLY
+                    // path to 'failing' — absence of delivery alone is benign.
+                    $status = 'failing';
+                } elseif ($lastDelivered !== null) {
+                    $status = 'flowing';
+                } else {
+                    // Subscribed, no clean delivery and no failure on record.
+                    // The publishes that exist (if any) reached zero subscribers
+                    // at the time — they predate this subscription, or the event
+                    // simply hasn't fired since the consumer started listening.
+                    $status = 'wired_idle';
+                }
+                $summary[$status]++;
+
+                $rows[] = [
+                    'topic' => $topic,
+                    'publisher' => $publisher,
+                    'subscribers' => $subscribers,
+                    'last_published' => $lastPublished ? Carbon::parse($lastPublished)->diffForHumans() : null,
+                    'last_delivered' => $lastDelivered ? Carbon::parse($lastDelivered)->diffForHumans() : null,
+                    'status' => $status,
+                ];
+            }
+
+            // Sort worst-first so problems surface at the top: failing, then
+            // orphan publishers, then the healthy/idle/dormant rows.
+            $order = ['failing' => 0, 'orphan_publisher' => 1, 'flowing' => 2, 'wired_idle' => 3, 'dormant' => 4];
+            usort($rows, function ($a, $b) use ($order) {
+                $cmp = ($order[$a['status']] ?? 9) <=> ($order[$b['status']] ?? 9);
+                return $cmp !== 0 ? $cmp : strcmp($a['topic'], $b['topic']);
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'rows' => $rows,
+                    'summary' => $summary,
+                    'total' => count($rows),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to build integration matrix: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     /**

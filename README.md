@@ -14,7 +14,9 @@ Manager Core is the optional hub that every other plugin in the ecosystem can in
 
 ---
 
-## 🎉 What's in v1.0.0
+## 🎉 What's in v1.0.1
+
+**Polish pass on top of v1.0.0.** Two themes: a major accuracy pass on the Plugin Bridge (the ecosystem map and Plugin Connections tab now honestly reflect what's wired to what), and a Topics registry expansion to 59 entries so every event the suite publishes is first-class. Plus the `plugin_updates_available` Watchdog check (alerts you when a plugin has a new Packagist release, 7-day per-version cooldown), an interactive "what would I lose without X" ecosystem map on the Help page, and fixes found while auditing the cross-plugin event chain end-to-end. Full details in [CHANGELOG.MD](CHANGELOG.MD).
 
 ### Hub services every plugin can use
 
@@ -22,13 +24,13 @@ Manager Core is the optional hub that every other plugin in the ecosystem can in
 |---|---|
 | **Pricing Orchestrator** | Per-market provider routing across 5 sources: MCPraisal (ESI region endpoint), Goonpraisal, Janice, Fuzzwork, SeAT prices-core. Operators pick which upstream powers each market. Per-plugin preferences with admin override. **Per-plugin `provider_override`** lets one consumer plugin route through a different provider for the same market (e.g. Mining Manager via Janice for Jita while Structure Manager continues through Fuzzwork). |
 | **EventBus** | Pub/sub with idempotency dedup, visibility scoping, Discord-injection sanitization, queued or sync delivery. Topics facade for one-line publishing. |
-| **Plugin Bridge** | Capability registry. Plugins advertise functions, others discover and call them. Worker-registry snapshots for queue-worker visibility. |
+| **Plugin Bridge** | Capability registry. Plugins advertise functions, others discover and call them. Worker-registry snapshots for queue-worker visibility. A 6-state detection model (offline / standalone / discovered / partial / full / error) computed entirely from live runtime signals — installed class, registered capabilities, real subscription + pricing rows, recent event traffic, and outbound-publish relationships — drives the ecosystem map and Plugin Connections tab. Nothing about the connections is hardcoded; the only static config is the plugin roster and event-prefix ownership. |
 | **Appraisal System** | go-evepraisal-style parser with group/category SDE classification. Public + private appraisals with secure tokens. |
 | **SDE Helpers** | Centralized type / group / category / icon lookups with cached results. |
 | **ESI Fast-Poll** | Shared key-holder pool for character_notifications polling. ~2 minute detection vs SeAT's native ~20-30 minute sweep. Used by Structure Manager today; any plugin can subscribe. |
 | **REST API** | Token-authenticated endpoints for external dashboards / Discord bots / spreadsheets. Per-token rate limits + append-only audit log. |
 | **Diagnostics UI** | 10-tab web dashboard: pricing, subscriptions, plugin connections, capabilities, event-bus state, API status, cache health, settings, providers, notification testing. |
-| **Watchdog** | Meta-monitoring of MC's own infrastructure. Every 5 minutes checks EventBus failures, price-cron freshness, ESI fast-poll pool health, and provider availability — posts alerts directly to a Discord or Slack webhook (auto-detected from URL pattern). Deliberately decoupled from EventBus so it still works when the bus itself is down. Disabled by default; opt in at Settings → Watchdog. |
+| **Watchdog** | Meta-monitoring of MC's own infrastructure. Every 5 minutes runs 5 checks (EventBus failures, price-cron freshness, ESI fast-poll pool health, provider availability, and **plugin updates available on Packagist** with a 7-day per-version cooldown so it doesn't spam — added in v1.0.1) and posts alerts directly to a Discord or Slack webhook (auto-detected from URL pattern). Deliberately decoupled from EventBus so it still works when the bus itself is down. Disabled by default; opt in at Settings → Watchdog. |
 | **Pre-seeded Nullsec Markets** | 7 Goonpraisal-tracked nullsec hubs (C-J6MT, GB-6X5, UALX-3, HY-RWO, O4T-Z5, R-ARKN, GM-0K7) ship dormant on every install. Operator enables and clicks Test to start using. No ESI auth, no structure picker, no citadel-scrape complexity. |
 
 ### Architectural posture
@@ -85,17 +87,17 @@ Or visit **Manager Core → Diagnostics** in the SeAT sidebar.
 
 ## 🔌 Compatible plugins
 
-Status as of v1.0.0:
+Status as of v1.0.1 (all 8 integrating; the Plugin Bridge's 6-state model shows each one's live wiring on the ecosystem map):
 
 | Plugin | Integration state | What it does with MC |
 |---|---|---|
-| [Mining Manager](https://github.com/MattFalahe/mining-manager) | ✅ Active | Publishes `mining.*` events, consumes `structure.alert.fuel_critical` for extraction risk warnings, reads pricing via PluginBridge |
-| [Structure Manager](https://github.com/MattFalahe/Structure-Manager) | ✅ Active (v2.0.0+) | Publishes 9 `structure.alert.*` event flavors, registers ESI notification handler with MC's key pool for ~2 min detection |
-| [Buyback Manager](https://github.com/MattFalahe/Buyback-Manager) | ✅ Active | Reads pricing via PluginBridge |
-| [HR Manager](https://github.com/MattFalahe/HR-Manager) | ⚪ Installed | (future: will subscribe to `mining.theft_detected` / `mining.tax_overdue` for compliance) |
-| [Corp Wallet Manager](https://github.com/MattFalahe/Corp-Wallet-Manager) | ⚪ Installed | (future: will publish `wallet.transaction_detected`) |
-| [Blueprint Manager](https://github.com/MattFalahe/Blueprint-Manager) | ⚪ Installed | (future: blueprint manufacturing cost calculations) |
-| [SeAT Broadcast](https://github.com/MattFalahe/SeAT-Discord-Pings) (`seat-discord-pings`) | ⚪ Installed | (future: will subscribe to ecosystem events for centralized Discord routing) |
+| [Mining Manager](https://github.com/MattFalahe/mining-manager) | ✅ Active | Publishes `mining.*` events (incl. the `mining.extraction_*` moon lifecycle), consumes `structure.alert.*` for extraction-risk warnings, reads pricing via PluginBridge |
+| [Structure Manager](https://github.com/MattFalahe/Structure-Manager) | ✅ Active | Publishes 9 `structure.alert.*` flavors + `structure_manager.timer.*`, registers an ESI notification handler with MC's key pool for ~2 min detection |
+| [Corp Wallet Manager](https://github.com/MattFalahe/Corp-Wallet-Manager) | ✅ Active | Publishes `member.*` milestones + `wallet.*` signals consumed by HR Manager; exposes 15 read-only ratting / contribution capabilities |
+| [SeAT Broadcast](https://github.com/MattFalahe/SeAT-Discord-Pings) (`seat-discord-pings`) | ✅ Active | Subscribes to `structure_manager.timer.*` + `mining.extraction_*` to populate its FC Opportunities board; publishes `pings.broadcast.sent` + `pings.formup.scheduled` |
+| [HR Manager](https://github.com/MattFalahe/HR-Manager) | ✅ Active | Subscribes to `mining.*`, `member.*`, `wallet.*`, `blueprint.request.*` for the player classifier; publishes its `hr.*` lifecycle catalog; consumes CWM's capabilities |
+| [Blueprint Manager](https://github.com/MattFalahe/Blueprint-Manager) | ✅ Active | Publishes `blueprint.request.*` lifecycle events consumed by HR Manager; exposes 2 read-only capabilities |
+| [Buyback Manager](https://github.com/MattFalahe/Buyback-Manager) | ✅ Active | Reads pricing via PluginBridge; publishes `buyback.*` events |
 
 Plugins detect MC at boot via `class_exists(\ManagerCore\Topics::class)`. Installing or uninstalling MC never breaks any plugin — integrations come online or fall back automatically.
 

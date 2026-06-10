@@ -143,6 +143,15 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         $activeEsiHandlers = $this->getActiveEsiHandlers();
         $recentEventPublishers = $this->getRecentEventPublishers();
 
+        // Outbound-publish channels: for each plugin that PUBLISHES events,
+        // how many OTHER plugins subscribe to what it publishes. Captures the
+        // wiring of publishers whose events are rare (e.g. Corp Wallet Manager
+        // publishes member.* milestones that HR subscribes to — a real, wired
+        // contract — but those events only fire when a member crosses a
+        // threshold, so the 24h live-traffic signal stays zero and the plugin
+        // looked merely "discovered" despite being plumbed into the ecosystem).
+        $outboundChannels = $this->getOutboundPublishChannels();
+
         // 2026-05-12 diagnostic-surface improvements: per-plugin "last event
         // activity" timestamps. These let operators tell a healthy plugin
         // ("active 30s ago") apart from a stale one ("idle 6h+") without
@@ -183,11 +192,17 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
             // plugin has wired or used: pricing, event subscriptions, ESI
             // handlers, event publishing. "Live traffic" = a real event
             // actually flowed (published or received) within the last 24h.
+            // Distinct OTHER plugins that subscribe to events this plugin
+            // publishes. >0 means a real outbound integration contract exists
+            // even if no event has fired in the 24h live-traffic window.
+            $outboundConsumerCount = $outboundChannels[$pluginKey] ?? 0;
+
             $channels = 0;
-            if ($pricingSubCount > 0)   { $channels++; }
-            if ($eventSubCount > 0)     { $channels++; }
-            if ($esiHandlerCount > 0)   { $channels++; }
-            if ($publishedRecently > 0) { $channels++; }
+            if ($pricingSubCount > 0)        { $channels++; }
+            if ($eventSubCount > 0)          { $channels++; }
+            if ($esiHandlerCount > 0)        { $channels++; }
+            if ($publishedRecently > 0)      { $channels++; }
+            if ($outboundConsumerCount > 0)  { $channels++; }
 
             $receivedRecently = isset($lastReceivedAt[$pluginKey])
                 && $this->isWithinDay($lastReceivedAt[$pluginKey]);
@@ -210,7 +225,7 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
                 'state_reason' => $this->describePluginState(
                     $state, $pricingSubCount, $eventSubCount, $esiHandlerCount,
                     $publishedRecently, $capabilityCount, $liveTraffic,
-                    $errorCount, $openCircuitCount
+                    $errorCount, $openCircuitCount, $outboundConsumerCount
                 ),
                 'status' => $status,   // legacy 3+1 value — DiagnosticController + getStatistics still read this
                 'subscription_count' => $pricingSubCount,                  // legacy field name kept for back-compat
@@ -219,6 +234,7 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
                     'event_subscriptions' => $eventSubCount,
                     'esi_handlers' => $esiHandlerCount,
                     'events_published_24h' => $publishedRecently,
+                    'consumed_by_plugins' => $outboundConsumerCount,
                     'capabilities' => $capabilityCount,
                     'channels' => $channels,
                     'live_traffic' => $liveTraffic,
@@ -348,6 +364,75 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         } catch (\Throwable $e) {
             return [];
         }
+    }
+
+    /**
+     * For each registered publisher plugin, count how many DISTINCT OTHER
+     * plugins have an active event subscription matching one of its
+     * publisher prefixes.
+     *
+     * This is the OUTBOUND-publish channel signal — "does anyone subscribe
+     * to what I publish?". It captures a real, wired integration contract
+     * that the inbound-only signals (do I subscribe / have pricing / ESI /
+     * publish-in-24h) miss for publishers whose events are RARE.
+     *
+     * Worked example: Corp Wallet Manager owns the wallet.* + member.*
+     * prefixes and publishes member.contribution.* / member.tax.* /
+     * wallet.unusual_recipient_detected. HR Manager subscribes to all of
+     * them. That's a genuine wiring — but those events only fire when a
+     * member crosses a contribution threshold (rare), so the 24h
+     * live-traffic signal stays at zero and CWM looked like a bare
+     * "discovered" plugin despite being plumbed straight into HR. Counting
+     * the subscription relationship promotes it to "partial" where it
+     * belongs. Blueprint Manager (blueprint.* consumed by HR) is the same
+     * shape.
+     *
+     * Self-subscriptions don't count (a plugin subscribing to its own
+     * events isn't an integration channel). Matching is prefix-based:
+     * a subscription pattern like `member.contribution.stalled` or
+     * `member.*` both match the publisher prefix `member.`.
+     *
+     * @return array [publisher_plugin => distinct_consumer_plugin_count]
+     */
+    protected function getOutboundPublishChannels(): array
+    {
+        $result = [];
+        try {
+            $prefixMap = config('manager-core.events.publisher_prefixes', []);
+            if (empty($prefixMap)) {
+                return [];
+            }
+
+            // All active subscriptions with their patterns (not just counts —
+            // we need the pattern string to prefix-match against publishers).
+            $subs = DB::table('manager_core_event_subscriptions')
+                ->where('is_active', true)
+                ->get(['subscriber_plugin', 'event_pattern']);
+
+            foreach ($prefixMap as $publisherPlugin => $prefixes) {
+                $consumers = [];
+                foreach ($subs as $sub) {
+                    // A plugin subscribing to its own published events isn't
+                    // an outbound integration channel.
+                    if ($sub->subscriber_plugin === $publisherPlugin) {
+                        continue;
+                    }
+                    foreach ((array) $prefixes as $prefix) {
+                        if (str_starts_with((string) $sub->event_pattern, (string) $prefix)) {
+                            $consumers[$sub->subscriber_plugin] = true;
+                            break; // one prefix match is enough for this subscription
+                        }
+                    }
+                }
+                if (!empty($consumers)) {
+                    $result[$publisherPlugin] = count($consumers);
+                }
+            }
+        } catch (\Throwable $e) {
+            // event_subscriptions table missing / early boot — no plugin
+            // gets the outbound bonus channel. Non-fatal.
+        }
+        return $result;
     }
 
     /**
@@ -617,14 +702,15 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         int $caps,
         bool $liveTraffic,
         int $errorCount,
-        int $openCircuits
+        int $openCircuits,
+        int $outboundConsumers = 0
     ): string {
         switch ($state) {
             case 'offline':
                 return 'Service provider class not loadable — the plugin is not installed via composer.';
 
             case 'standalone':
-                return 'Installed, but not integrating with Manager Core (no capabilities, subscriptions, or events).';
+                return 'Installed and integration-capable, but not currently wired to Manager Core (no capabilities, subscriptions, or events). This is normal when the plugin is configured to run independently — e.g. set to use its own price provider instead of Manager Core. Enable the relevant integration in the plugin\'s own settings (for example, select Manager Core as its price provider) and it will move to Partial automatically.';
 
             case 'discovered':
                 return $caps . ' ' . ($caps === 1 ? 'capability' : 'capabilities')
@@ -654,6 +740,9 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
                 }
                 if ($published > 0) {
                     $wired[] = $published . ' event ' . ($published === 1 ? 'type' : 'types') . ' published in 24h';
+                }
+                if ($outboundConsumers > 0) {
+                    $wired[] = 'publishes events consumed by ' . $outboundConsumers . ' ' . ($outboundConsumers === 1 ? 'plugin' : 'plugins');
                 }
                 $label = $state === 'full' ? 'Full data exchange' : 'Partial data exchange';
                 $desc = $label . ': ' . (empty($wired) ? 'integrating' : implode(', ', $wired)) . '.';
@@ -699,17 +788,37 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
             return;
         }
 
-        // Update in-memory plugins map for this request lifecycle
-        $this->plugins[$pluginKey] = [
-            'name' => $info['name'] ?? $pluginKey,
-            'class' => $providerClass,
-            'package' => $info['package'] ?? $pluginKey,
-            'icon' => $info['icon'] ?? 'fa-puzzle-piece',
-            'installed' => true,
-            'status' => 'installed',
-            'subscription_count' => 0,
-            'self_registered' => true,
-        ];
+        // Don't downgrade a plugin that discover() already resolved with the
+        // full 6-state model. registerSelf() exists for plugins NOT in the
+        // hardcoded compatible_plugins list. When a plugin is BOTH in that
+        // list AND calls registerSelf defensively (SeAT Broadcast does this,
+        // see DiscordPingsServiceProvider — it covers older MC builds that
+        // didn't ship the hardcoded entry), the rich discovered entry must
+        // win. It carries 'state', 'state_reason' and 'integration'; this
+        // minimal stub carries none of those and hardcodes status='installed'.
+        // Overwriting the discovered entry made SeAT Broadcast show as a bare
+        // "installed" on the Plugin Connections tab + a stateless node on the
+        // ecosystem map, despite being fully wired (2 event subs + outbound
+        // publishing + live traffic = Full exchange). The map-replacement in
+        // discover() handles the reverse boot order (stub created first, then
+        // discover() rebuilds the whole map richly), so guarding here covers
+        // both orderings.
+        $existing = $this->plugins[$pluginKey] ?? null;
+        $alreadyDiscovered = is_array($existing) && array_key_exists('state', $existing);
+
+        if (!$alreadyDiscovered) {
+            // Update in-memory plugins map for this request lifecycle
+            $this->plugins[$pluginKey] = [
+                'name' => $info['name'] ?? $pluginKey,
+                'class' => $providerClass,
+                'package' => $info['package'] ?? $pluginKey,
+                'icon' => $info['icon'] ?? 'fa-puzzle-piece',
+                'installed' => true,
+                'status' => 'installed',
+                'subscription_count' => 0,
+                'self_registered' => true,
+            ];
+        }
 
         // Persist to registry so it survives until the next discover() pass
         try {

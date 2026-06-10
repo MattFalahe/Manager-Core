@@ -3,7 +3,7 @@
 return [
     'manager-core' => [
         'name'          => 'Manager Core',
-        'icon'          => 'fas fa-calculator',
+        'icon'          => 'fas fa-microchip',
         'route_segment' => 'manager-core',
         'permission'    => 'manager-core.view',
         'entries'       => [

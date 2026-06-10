@@ -6,10 +6,30 @@
 @push('head')
 <link rel="stylesheet" href="{{ asset('vendor/manager-core/css/manager-core.css') }}?v=3">
 <link rel="stylesheet" href="{{ asset('vendor/manager-core/css/plugin-bridge.css') }}?v=3">
+<style>
+    .manager-core-wrapper .mc-bridge-tabs { margin-bottom: 0; }
+    .manager-core-wrapper .mc-bridge-tabs .nav-link { color: #9aa3b0; cursor: pointer; border: none; }
+    .manager-core-wrapper .mc-bridge-tabs .nav-link:hover { color: #c7d2fe; }
+    .manager-core-wrapper .mc-bridge-tabs .nav-link.active { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
+</style>
 @endpush
 
 @section('full')
 <div class="manager-core-wrapper">
+
+    {{-- Tabs: the live registry (what's actually wired right now) vs the
+         interactive ecosystem simulation (the what-if map). Wrapped in a
+         card so the tab bar matches the rest of the page chrome. --}}
+    <div class="card card-dark mb-3">
+        <div class="card-body" style="padding: 0.55rem 1rem;">
+            <ul class="nav nav-pills mc-bridge-tabs" id="bridgeTabs">
+                <li class="nav-item"><a href="#" class="nav-link active" data-btab="live"><i class="fas fa-broadcast-tower"></i> Live registry</a></li>
+                <li class="nav-item"><a href="#" class="nav-link" data-btab="sim"><i class="fas fa-project-diagram"></i> Ecosystem simulation</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="btab-pane" data-bpane="live">
 
     {{-- Ecosystem map — circuit-board visualisation framed in a canonical card --}}
     <div class="card card-dark">
@@ -462,6 +482,14 @@
                                     @php $anySignal = true; @endphp
                                 @endif
 
+                                @if(($integration['consumed_by_plugins'] ?? 0) > 0)
+                                    <span class="badge badge-info" style="margin-right:2px;"
+                                          title="Other plugins that subscribe to events this plugin publishes (a wired contract even when the events are rare and haven't fired in 24h)">
+                                        <i class="fas fa-share-alt"></i> feeds {{ $integration['consumed_by_plugins'] }}
+                                    </span>
+                                    @php $anySignal = true; @endphp
+                                @endif
+
                                 @if(($integration['capabilities'] ?? 0) > 0)
                                     <span class="badge badge-light" style="margin-right:2px;"
                                           title="Capabilities this plugin registered with the PluginBridge">
@@ -613,6 +641,20 @@
     </div>
 </div>{{-- /.row --}}
 
+    </div>{{-- /.btab-pane live --}}
+
+    <div class="btab-pane" data-bpane="sim" style="display: none;">
+        <div class="card card-dark">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-project-diagram"></i> Ecosystem simulation</h3>
+            </div>
+            <div class="card-body">
+                <p class="text-muted" style="margin-bottom: 4px;">The Live registry shows what's wired right now. This is the what-if: switch a plugin off and see what the rest of the suite would lose. It's a model of how the plugins depend on each other, independent of what you currently have installed.</p>
+                @include('manager-core::partials._ecosystem_map')
+            </div>
+        </div>
+    </div>{{-- /.btab-pane sim --}}
+
 </div>{{-- /.manager-core-wrapper --}}
 @endsection
 
@@ -621,6 +663,21 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize tooltips
     $('[data-toggle="tooltip"]').tooltip();
+
+    // Tab switch: Live registry <-> Ecosystem simulation.
+    (function () {
+        var tabs = document.querySelectorAll('#bridgeTabs .nav-link');
+        var panes = document.querySelectorAll('.btab-pane');
+        if (!tabs.length) return;
+        tabs.forEach(function (t) {
+            t.addEventListener('click', function (e) {
+                e.preventDefault();
+                var which = t.getAttribute('data-btab');
+                tabs.forEach(function (x) { x.classList.toggle('active', x === t); });
+                panes.forEach(function (p) { p.style.display = (p.getAttribute('data-bpane') === which) ? '' : 'none'; });
+            });
+        });
+    })();
 
     // Draw connection lines from core to each plugin node
     const core = document.querySelector('.plugin-core');

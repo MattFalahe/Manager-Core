@@ -329,7 +329,14 @@ return [
         'publisher_prefixes' => [
             'mining-manager' => ['mining.'],
             'structure-manager' => ['structure.', 'structure_manager.'],
-            'corp-wallet-manager' => ['wallet.'],
+            // CWM publishes BOTH wallet.* (corp-wallet-level signals) and
+            // member.* (per-member contribution/tax signals — see the
+            // Topics registry, where every member.contribution.* /
+            // member.tax.* topic has publisher = corp-wallet-manager).
+            // Without 'member.' here, enforce_publisher_prefix rejected
+            // those at publish time and HR's member.* subscribers never
+            // fired. Fixed 2026-06-08.
+            'corp-wallet-manager' => ['wallet.', 'member.'],
             'buyback-manager' => ['buyback.'],
             'blueprint-manager' => ['blueprint.'],
             'hr-manager' => ['hr.'],

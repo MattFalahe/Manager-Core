@@ -4,6 +4,86 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 
 ---
 
+## [1.0.1] - Polish Pass
+
+Patch release on top of v1.0.0. Two themes: (1) a major accuracy pass on the Plugin Bridge so the ecosystem map and Plugin Connections tab honestly reflect what's wired to what, and (2) a big Topics registry expansion so every event the suite publishes is first-class (validated, idempotent, visible in MC's tooling). Plus a new Watchdog check, an interactive ecosystem map on the Help page, and a handful of fixes found while auditing the cross-plugin event chain end-to-end. Pure additions — nothing existing changed behavior.
+
+### 🎉 New Watchdog check — `plugin_updates_available`
+
+Fires when any plugin in the suite has a new tagged release on Packagist that this install hasn't picked up yet. Reuses `EcosystemVersionChecker` (the same 6h Packagist cache that powers the Plugin Bridge badges) so there's no extra HTTP load. Only plugins reporting `status='outdated'` trigger the alert; dev branches, Coming Soon, and Packagist-unreachable states stay silent.
+
+| Property | Value |
+|---|---|
+| Dedup window | **7 days** per (plugin, latest_version), NOT the standard 1h |
+| Batched format | ONE Discord/Slack embed lists every fresh outdated plugin, not one ping per plugin |
+| Clickable title | Embed title deep-links to MC → Plugin Bridge (uses `embed.url` on Discord, `title_link` on Slack) |
+| Severity | `warning` (amber). NOT critical — that stays reserved for "MC is broken now" |
+| Settings | Per-check toggle on **Settings → Watchdog**. Enabled by default |
+| Diagnostic preview | New "Send sample" button on **Diagnostics → Notification Testing** with a 3-plugin realistic example |
+
+Behavior in practice: Day 0 it sees MM 2.0.0 → 2.0.1 and fires (7-day dedup key set). Days 1-6 silent. Day 7 it reminds if still outdated. Operator upgrades → status becomes `current` → no more pings for that version. A *newer* version (2.0.2) uses a different dedup key so it fires immediately rather than waiting out the 2.0.1 cooldown.
+
+### 🎉 Interactive ecosystem map on the Help page
+
+The Plugin Bridge's circuit-board visual was extracted to a shared partial, enlarged, and turned into an interactive **"what would I lose without X"** map on the Help page's new **Plugin Family** section. Hover any plugin to highlight its connections; family plugins use purple-gradient edges, external/optional plugins sit on the right with yellow edges, and lost connections go red. Each plugin shows its real SeAT sidebar icon (SeAT Broadcast uses the Discord brand mark; Manager Core uses the microchip). A companion **Ecosystem Simulation** tab on the Plugin Bridge page lets you preview the same map. Industry Manager is intentionally omitted from the simulation while it's still in development.
+
+### 🆕 Topics registry expansion — every suite event is now first-class
+
+Before v1.0.1, several plugins published events through the raw `EventBus::publish` path, which skipped the required-field validation, idempotency-key composition, and payload sanitization that `Topics::publish` provides — and left those events invisible to MC's tooling (Plugin Bridge UI, Topics catalog, diagnostics). This release registers the full catalog. The Topics registry grew to **59 entries**. New this version:
+
+| Group | Count | Publisher | Notes |
+|---|---|---|---|
+| CWM `member.*` milestones | 4 | corp-wallet-manager | `first_payment`, `subscription_resumed`, `subscription_lapsed`, `left` |
+| CWM/HR audit gap-closers | 3 | CWM + HR | `member.contribution.drop_detected`, `wallet.unusual_recipient_detected`, `hr.player.milestone_reached` |
+| HR Manager lifecycle | 18 | hr-manager | `hr.application.*`, classifier `hr.player.flagged_*` / `recovered` / `*_director`, `hr.purge.*` |
+| Blueprint Manager request lifecycle | 4 | blueprint-manager | request created / approved / rejected / fulfilled |
+
+HR's recurring classifier transitions use a `:{detected_at}` idempotency discriminator so a recover-then-re-flag publishes again instead of being deduped forever; the purge reminder is a fixed `hr.purge.reminder` topic with the tier carried in the payload (not a dynamic `hr.purge.reminder_{tier}` topic name). HR's matching switch to `Topics::publish` routes everything through the canonical path. Purely additive — no existing topic changed.
+
+### 🎉 Diagnostics — Topic Matrix
+
+The Event Bus diagnostic tab gained a **Topic Matrix**: the cross-plugin communication graph in one table. For every registered topic it joins the publisher (from the Topics registry), the subscribers (matched against the live subscription table with the same `fnmatch` the EventBus dispatches with), and the last published / last delivered timestamps (from the event log), then classifies each as **flowing** (delivered to a subscriber), **wired, idle** (subscribed but no traffic yet — normal for rare events), **no subscribers** (published but nobody listens), **failing** (published but never delivered), or **dormant** (registered, never published). Worst-first sort so problems surface at the top. Answers "is my ecosystem actually talking?" without cross-referencing two separate lists.
+
+### 🐛 Fixes
+
+**Plugin Bridge state accuracy.** A cluster of fixes so the ecosystem map, Plugin Registry table, Plugin Connections tab, and CLI all agree on each plugin's real state:
+
+- **Outbound-publish channels (the `feeds N` signal).** A plugin that publishes events another plugin subscribes to (Corp Wallet Manager → HR via `member.*`/`wallet.*`, Blueprint → HR via `blueprint.request.*`) was stuck at "Discovered" because those events are rare — no live traffic in 24h — so the inbound-only channel detection missed the wiring. The bridge now counts "does anyone subscribe to what I publish?" as a real channel (computed from actual subscription rows, not hardcoded), so rare-event publishers correctly show **Partial**.
+- **Plugin Connections tab trusts the bridge state.** The diagnostic tab had leftover pre-6-state logic that recomputed status as `pricing_subscriptions > 0 ? active : installed`, forcing every non-pricing plugin (CWM, SM, SeAT Broadcast, Blueprint, HR) back to "installed" regardless of how it actually integrated. Removed; the tab now reads the same 6-state model as the registry, with a shared badge helper so labels match exactly.
+- **`registerSelf` no longer downgrades a discovered plugin.** SeAT Broadcast is in the hardcoded plugin list AND calls `bridge.registerSelf()` defensively; because it boots after MC, its self-registration overwrote the rich discovered entry with a minimal stateless stub, making it show as a bare "installed" despite being fully wired. `registerSelf` now skips the overwrite when discovery already resolved the plugin.
+- **Clearer "standalone" wording.** The standalone reason now explains the plugin is integration-capable but not currently wired (e.g. configured to use its own price provider) and will move to Partial once the integration is enabled — instead of the old terse "not integrating" that read like the plugin was broken.
+
+**corp-wallet-manager `member.*` events were rejected at the publish gate.** The `enforce_publisher_prefix` allow-list granted CWM only the `wallet.` prefix, but CWM publishes both `wallet.*` and `member.*`. `EventBus::publish` rejected every `member.*` publish with `publisher_prefix_not_allowed` before it reached a subscriber, silently breaking HR's wallet-signal subscriptions. Fixed: `corp-wallet-manager => ['wallet.', 'member.']`.
+
+**CWM Plugin Bridge config alignment.** A workaround that special-cased CWM's service-provider FQN with the legacy `Seat\CorpWalletManager\` prefix was reverted now that CWM v3.0.0 matches the suite-wide `CorpWalletManager\` namespace convention. Uniform `class_exists` discovery for all 8 compatible plugins, no maintenance trap.
+
+**Migration idempotency.** The last 6 CREATE migrations gained `Schema::hasTable` guards so the whole 17-file set is safely re-runnable — a partial migration run can be re-applied without "table already exists" errors. No schema change; the resulting tables are identical.
+
+### 📊 By the numbers (delta from v1.0.0)
+
+- **5 Watchdog checks** (was 4) — `plugin_updates_available` joins the existing four
+- **59 Topics** in the registry — 29 new entries this version (4 CWM milestones + 3 audit gap-closers + 18 HR lifecycle + 4 Blueprint)
+- **Plugin Bridge `feeds N` signal** added — outbound-publish channel detection
+- **All 8 compatible plugins** discover uniformly (CWM FQN special-case removed)
+
+### 🚀 Upgrade Instructions
+
+```bash
+# Add mattfalahe/manager-core to the SEAT_PLUGINS list in your SeAT-Docker .env (no change needed if already there)
+
+# Then from /opt/seat-docker, take the stack down + back up:
+docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-compose.traefik.yml down
+docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-compose.traefik.yml up -d
+```
+
+Container boot pulls v1.0.1 via composer. No new tables or schema changes (the existing CREATE migrations just gained `hasTable` guards). After restart: **Settings → Watchdog** has the new `plugin_updates_available` toggle (on by default); **Diagnostics → Notification Testing** has a "Send sample" button for it; **Help → Plugin Family** has the interactive ecosystem map.
+
+### ⚠️ Breaking Changes
+
+**None.** Pure additions. All existing Watchdog checks, EventBus subscribers, Topics, and Plugin Bridge integrations work unchanged.
+
+---
+
 ## [1.0.0] - The Foundation Era
 
 **The first stable release.** Everything in the MattFalahe SeAT ecosystem can now route through one shared infrastructure layer: cross-plugin events, centralized market pricing via a multi-provider orchestrator, ESI fast-poll for notification detection, a capability registry for plugin-to-plugin calls, and a unified diagnostics dashboard.
@@ -81,6 +161,7 @@ Manager Core ships a dedicated self-monitoring layer that watches MC's own infra
 | `price_cron_overdue` | Newest cached price older than 2× the scheduled cron interval |
 | `esi_fast_poll_failing` | ≥80% of enabled ESI key holders have a non-success `last_poll_status` (skipped at pool size <3) |
 | `provider_unavailable` | Any price provider routing an enabled market reports `isAvailable=false` |
+| `plugin_updates_available` | Any plugin in the suite has a new tagged release on Packagist (7-day per-(plugin, version) cooldown so the same release won't spam) |
 
 Key properties:
 

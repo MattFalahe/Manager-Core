@@ -323,6 +323,44 @@ class Topics
                 'idempotency_template' => 'wallet.balance_low:{corporation_id}:{detected_at}',
                 'description' => 'A corporation wallet balance crossed below a configured threshold.',
             ],
+            'wallet.unusual_recipient_detected' => [
+                'publisher' => 'corp-wallet-manager',
+                'required' => ['corporation_id'],
+                'idempotency_template' => 'wallet.unusual_recipient:{corporation_id}:{recipient_id}:{detected_at}',
+                'description' => 'A corp wallet payment went to a recipient that doesn\'t match the corp\'s established payment patterns (unexpected external character or corp). Subscribed by HR Manager for assessment-cache nudges + audit trail. Recipient details (id + name + transaction snapshot) live in the payload.',
+            ],
+
+            // -------- Member milestones (Corp Wallet Manager -> HR Manager) --------
+            // Three edge-transition events fired from CWM's MemberMilestoneNotifier
+            // when notable per-member contribution thresholds cross. HR Manager
+            // (and any future consumer) subscribes to react on the transition
+            // instead of polling the contribution cache. State tracked in
+            // CWM's corpwalletmanager_member_milestone_state table so each
+            // transition publishes exactly once.
+            'member.contribution.stalled' => [
+                'publisher' => 'corp-wallet-manager',
+                'required' => ['corporation_id', 'character_id'],
+                'idempotency_template' => 'member.stalled:{corporation_id}:{character_id}:{detected_at}',
+                'description' => 'A member crossed from active to >= 2 consecutive zero-contribution months ending now. Cleared on recovery so the next stall after a return emits properly.',
+            ],
+            'member.contribution.milestone' => [
+                'publisher' => 'corp-wallet-manager',
+                'required' => ['corporation_id', 'character_id', 'milestone_isk'],
+                'idempotency_template' => 'member.milestone:{corporation_id}:{character_id}:{milestone_isk}',
+                'description' => 'A member crossed a lifetime contribution ladder rung (1B / 5B / 10B / 25B / 50B / 100B ISK). Each rung publishes exactly once.',
+            ],
+            'member.contribution.drop_detected' => [
+                'publisher' => 'corp-wallet-manager',
+                'required' => ['corporation_id', 'character_id'],
+                'idempotency_template' => 'member.drop_detected:{corporation_id}:{character_id}:{detected_at}',
+                'description' => 'A member\'s contribution dropped sharply versus their established baseline (trailing-window total fell more than the configured drop floor vs the prior reference window). Cleared on recovery so a subsequent drop after a return publishes properly. Subscribed by HR Manager for assessment-cache nudges.',
+            ],
+            'member.tax.compliance_dropped' => [
+                'publisher' => 'corp-wallet-manager',
+                'required' => ['corporation_id', 'character_id', 'compliance_pct'],
+                'idempotency_template' => 'member.compliance_dropped:{corporation_id}:{character_id}:{detected_at}',
+                'description' => 'A member trailing-3-month Mining Manager tax compliance fell below the configured floor (default 50%). Recovers above the floor before the next drop publishes.',
+            ],
 
             // -------- Buyback Manager (for future use) --------
             'buyback.completed' => [
@@ -330,6 +368,149 @@ class Topics
                 'required' => ['buyback_id'],
                 'idempotency_template' => 'buyback.completed:{buyback_id}',
                 'description' => 'A buyback request was completed.',
+            ],
+
+            // -------- HR Manager (player milestone signals) --------
+            // HR publishes its own milestone-reached event when a player
+            // crosses an HR-defined contribution ladder rung. Distinct
+            // from CWM's member.contribution.milestone (which is the
+            // wallet-side trigger): HR computes its own rungs by rolling
+            // up across alts via PlayerService and emits this once per
+            // player+milestone combination. SeAT Broadcast is the
+            // intended consumer for in-channel celebration / promotion
+            // pings; currently the only subscriber path is HR's own
+            // assessment-cache nudges.
+            'hr.player.milestone_reached' => [
+                'publisher' => 'hr-manager',
+                'required' => ['character_id', 'corporation_id', 'milestone_isk'],
+                'idempotency_template' => 'hr.milestone:{corporation_id}:{character_id}:{milestone_isk}',
+                'description' => 'An HR-tracked player crossed a contribution milestone rung (1B / 5B / 10B / etc. depending on the HR-defined ladder). Each rung publishes exactly once per character. Payload includes the lifetime_total and months_active contextual fields plus the user_id for Discord cross-reference. Consumers can route to Discord for promotion pings or roll up across alts via PlayerService.',
+            ],
+
+            // -------- HR Manager (recruitment application lifecycle) --------
+            // Funnel events fired from HR ApplicationService as an applicant
+            // moves through the pipeline. SeAT Broadcast is the primary
+            // consumer (recruiter DMs / channel pings); handler_user_ids in
+            // the payload lets it target the assigned recruiters instead of
+            // the whole channel. All publish via Topics::publish.
+            'hr.application.submitted' => [
+                'publisher' => 'hr-manager',
+                'required' => ['application_id', 'character_id', 'corporation_id'],
+                'idempotency_template' => 'hr.app.submitted:{application_id}',
+                'description' => 'A prospective member submitted a recruitment application. Payload carries template_id, the applicant character + corp, and handler_user_ids (assigned recruiters) so consumers can DM the right people instead of broadcasting. Publishes once per application.',
+            ],
+            'hr.application.accepted' => [
+                'publisher' => 'hr-manager',
+                'required' => ['application_id', 'character_id', 'corporation_id'],
+                'idempotency_template' => 'hr.app.decided:{application_id}:accepted',
+                'description' => 'A recruitment application was accepted. Carries old_status, decided_by and decided_at. Consumers route acceptance pings or trigger onboarding. Publishes once per application.',
+            ],
+            'hr.application.rejected' => [
+                'publisher' => 'hr-manager',
+                'required' => ['application_id', 'character_id', 'corporation_id'],
+                'idempotency_template' => 'hr.app.decided:{application_id}:rejected',
+                'description' => 'A recruitment application was rejected. Carries old_status, decided_by, decided_at and the optional reviewer comment. Publishes once per application.',
+            ],
+            'hr.application.withdrawn' => [
+                'publisher' => 'hr-manager',
+                'required' => ['application_id', 'character_id', 'corporation_id'],
+                'idempotency_template' => 'hr.app.decided:{application_id}:withdrawn',
+                'description' => 'An applicant withdrew their own recruitment application. Carries old_status and decided_at. Publishes once per application.',
+            ],
+            'hr.application.status_changed' => [
+                'publisher' => 'hr-manager',
+                'required' => ['application_id', 'character_id', 'corporation_id', 'status'],
+                'idempotency_template' => 'hr.app.status:{application_id}:{status}',
+                'description' => 'Catch-all recruitment application status transition not covered by the explicit accepted/rejected/withdrawn events (e.g. a move to an interim review stage). Carries old_status plus the new status. Publishes once per (application, status).',
+            ],
+            'hr.application.joined_corp' => [
+                'publisher' => 'hr-manager',
+                'required' => ['application_id', 'character_id', 'corporation_id'],
+                'idempotency_template' => 'hr.app.joined:{application_id}',
+                'description' => 'An accepted applicant was detected actually joining the corp in-game (corp-history match by DetectCorpJoinsCommand). Carries joined_corp_at. Closes the recruitment loop so consumers can fire a welcome ping. Publishes once per application.',
+            ],
+
+            // -------- HR Manager (player classification + director signals) --------
+            // Director-facing lifecycle events from HR ClassifierService as a
+            // player activity classification changes. HR guards each with a
+            // once-per-day history check plus a real-transition guard, so
+            // these fire on genuine state changes, not every classifier run.
+            // detected_at in the payload makes the idempotency key unique per
+            // transition, so a player who recovers and later re-flags
+            // publishes again rather than being permanently deduped.
+            'hr.player.classification_changed' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.classification:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'A tracked player moved between activity categories (active / at_risk / inactive / dead_weight) in a way not covered by the more specific flagged_*/recovered events. Carries old_category, new_category, days_inactive, threshold_days, tier_level and any wallet_flags.',
+            ],
+            'hr.player.flagged_at_risk' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.flagged_at_risk:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'A player crossed from active into the at-risk band (inactivity reached half the corp threshold). Early-warning signal for retention outreach. Re-publishes if the player recovers then slips again.',
+            ],
+            'hr.player.flagged_inactive' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.flagged_inactive:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'A player crossed the corp inactivity threshold and is now classified inactive. Carries days_inactive + threshold_days. Consumers route director attention or schedule outreach.',
+            ],
+            'hr.player.flagged_dead_weight' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.flagged_dead_weight:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'A player reached twice the corp inactivity threshold (dead-weight band) and is a candidate for the purge workflow. Carries days_inactive + threshold_days.',
+            ],
+            'hr.player.recovered' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.recovered:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'A previously flagged player returned to active (inactivity dropped back below the at-risk band). Lets consumers clear prior warnings and celebrate the return.',
+            ],
+            'hr.player.flagged_wallet_stalled' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.flagged_wallet_stalled:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'HR folded a CWM member.contribution.stalled signal into a player flag (the member has stalled contributions while otherwise appearing active). Carries the category + tier_level context. Bridges wallet behaviour into the classifier.',
+            ],
+            'hr.player.flagged_wallet_compliance_low' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.flagged_wallet_compliance_low:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'HR flagged a player whose Mining Manager tax compliance dropped below the configured floor (derived from a CWM member.tax.compliance_dropped signal). Carries the category + tier_level context.',
+            ],
+            'hr.player.flagged_negative_contribution' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.flagged_negative_contribution:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'HR flagged a player whose net corp contribution turned negative (withdrawals exceeding deposits over the window, derived from CWM wallet signals). Carries the category + tier_level context.',
+            ],
+            'hr.player.inactive_director' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.inactive_director:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'A character holding a corp director/leadership role crossed the inactivity threshold (a director who has gone quiet). Higher-severity retention/security signal. Carries days_inactive + threshold_days.',
+            ],
+            'hr.player.silent_wallet_director' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.silent_wallet_director:{corporation_id}:{user_id}:{detected_at}',
+                'description' => 'A director-level character is active in-game but shows no corp wallet contribution activity (potential security/stewardship concern surfaced by cross-referencing classification with CWM signals).',
+            ],
+
+            // -------- HR Manager (purge workflow) --------
+            'hr.purge.reminder' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id', 'milestone'],
+                'idempotency_template' => 'hr.purge.reminder:{corporation_id}:{user_id}:{milestone}',
+                'description' => 'A scheduled-purge countdown reminder fired for a player at a given milestone tier (the milestone field carries the tier, e.g. the days-remaining bucket). Payload includes scheduled_for, reason, characters_in_corp and current_squads. One publish per (player, milestone tier). The tier lives in the payload, not the topic name.',
+            ],
+            'hr.purge.executed' => [
+                'publisher' => 'hr-manager',
+                'required' => ['user_id', 'corporation_id'],
+                'idempotency_template' => 'hr.purge.executed:{player_status_id}',
+                'description' => 'A scheduled purge was executed for a player (the removal workflow ran). Carries player_status_id and executed_by. One publish per purge status row.',
             ],
 
             // -------- Manager Core (pricing config lifecycle) --------
@@ -387,6 +568,38 @@ class Topics
                 'required' => ['scheduled_ping_id', 'tactical_event_id'],
                 'idempotency_template' => 'pings.formup.scheduled:{scheduled_ping_id}',
                 'description' => 'An FC scheduled a broadcast correlated with a tactical event (form-up workflow).',
+            ],
+
+            // -------- Blueprint Manager (member request lifecycle) --------
+            // 2026-06-10: Blueprint Manager publishes its request lifecycle so
+            // consumers (HR Manager) can build a per-member engagement signal:
+            // who uses the blueprint library, fulfilment vs rejection counts,
+            // favourite types. `character_id` is always the REQUESTER across all
+            // four events (the manager/actor rides in actor_character_id) so a
+            // subscriber attributes the activity to the requesting member.
+            'blueprint.request.created' => [
+                'publisher' => 'blueprint-manager',
+                'required' => ['request_id', 'corporation_id', 'character_id'],
+                'idempotency_template' => 'blueprint.request.created:{request_id}',
+                'description' => 'A member submitted a blueprint (copy) request to the corporation.',
+            ],
+            'blueprint.request.approved' => [
+                'publisher' => 'blueprint-manager',
+                'required' => ['request_id', 'corporation_id', 'character_id'],
+                'idempotency_template' => 'blueprint.request.approved:{request_id}',
+                'description' => 'A manager approved a pending blueprint request.',
+            ],
+            'blueprint.request.rejected' => [
+                'publisher' => 'blueprint-manager',
+                'required' => ['request_id', 'corporation_id', 'character_id'],
+                'idempotency_template' => 'blueprint.request.rejected:{request_id}',
+                'description' => 'A manager rejected a pending blueprint request.',
+            ],
+            'blueprint.request.fulfilled' => [
+                'publisher' => 'blueprint-manager',
+                'required' => ['request_id', 'corporation_id', 'character_id'],
+                'idempotency_template' => 'blueprint.request.fulfilled:{request_id}',
+                'description' => 'A manager delivered (fulfilled) an approved blueprint request in-game.',
             ],
         ];
     }
