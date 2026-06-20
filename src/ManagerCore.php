@@ -24,7 +24,7 @@ class ManagerCore
      * Plugins can compare against this constant to gate features that depend
      * on a newer MC version. Keep in sync with composer.json.
      */
-    const VERSION = '1.0.1';
+    const VERSION = '1.0.2';
 
     /**
      * The major.minor channel — useful for "any 1.x" gating.

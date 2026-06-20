@@ -4,6 +4,44 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 
 ---
 
+## [1.0.2] - Doctrine Compliance Wiring
+
+Patch release on top of v1.0.1. Wires Structure Manager's new structure-doctrine compliance feature into the ecosystem (one new Topic plus the bridge capability) so HR Manager, in preparation, can render per-corp compliance on its Corp Health page once it ships, and brings the Help page's Connected Plugins descriptions in line with each plugin's real Packagist release status (released plugins describe what they do today; not-yet-released plugins are shown as in preparation). Pure additions: one new Topic plus refreshed documentation, with no schema changes and no behavior changes to anything already wired.
+
+### 🆕 New Topic: `structure.doctrine.changed`
+
+Structure Manager now publishes `structure.doctrine.changed` whenever a structure-fitting doctrine (or a compliance setting) changes. The payload carries `scope_type` / `scope_id`, an optional `structure_type_id` + `security_band`, and an `action` (created / updated / deleted / settings). HR Manager (in preparation) will subscribe to invalidate its cached compliance view, then re-pull the full report through the Plugin Bridge capability `structure-manager:compliance.getForCorporation`. Registering it in the Topics registry gives it the same first-class treatment every other event already has: required-field validation, an idempotency template (`structure.doctrine.changed:{scope_type}:{scope_id}:{action}`), and visibility in MC's Topic Matrix and Plugin Bridge tooling. The registry grows to **60 entries** (was 59).
+
+### 📖 Documentation accuracy
+
+- **README plugin table.** The Structure Manager row now lists `structure.doctrine.changed` and the `compliance.getForCorporation` capability; the HR Manager and Buyback Manager rows are marked **In preparation** (not yet released on Packagist, with MC already wired for them) rather than Active.
+- **Help: Connected Plugins now track real release status.** The descriptions follow each plugin's Packagist release state instead of a blanket `Future:` stub: the released plugins (Corp Wallet Manager, Blueprint Manager, SeAT Broadcast and the rest) describe what they publish and consume today, while the not-yet-released plugins (Buyback Manager, HR Manager) are shown as in preparation with MC already wired for them. The SeAT Broadcast display name is corrected (was "SeAT Discord Pings"), and the block is em-dash-free with colon separators to match the README table.
+- **Interactive ecosystem map.** Added the Structure Manager to HR Manager edge (per-structure doctrine compliance vs alliance fits on Corp Health) so the "what would I lose without X" map reflects the new data flow.
+
+### 📊 By the numbers (delta from v1.0.1)
+
+- **60 Topics** in the registry (was 59): `structure.doctrine.changed` added
+- **0 schema changes**: no migrations, no table edits
+- **0 behavior changes**: existing subscribers, capabilities and pricing routes all unchanged
+
+### 🚀 Upgrade Instructions
+
+```bash
+# mattfalahe/manager-core is already in the SEAT_PLUGINS list from v1.0.0/v1.0.1 (no change needed)
+
+# From /opt/seat-docker, take the stack down + back up:
+docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-compose.traefik.yml down
+docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-compose.traefik.yml up -d
+```
+
+Container boot pulls v1.0.2 via composer. No new tables or schema changes. After restart: **Diagnostics → Event Bus → Topic Matrix** lists `structure.doctrine.changed`, and **Help → Connected Plugins / Plugin Family** show the refreshed descriptions and the new Structure Manager to HR Manager edge.
+
+### ⚠️ Breaking Changes
+
+**None.** Pure additions. Every existing Topic, subscriber, capability and Plugin Bridge integration works unchanged.
+
+---
+
 ## [1.0.1] - Polish Pass
 
 Patch release on top of v1.0.0. Two themes: (1) a major accuracy pass on the Plugin Bridge so the ecosystem map and Plugin Connections tab honestly reflect what's wired to what, and (2) a big Topics registry expansion so every event the suite publishes is first-class (validated, idempotent, visible in MC's tooling). Plus a new Watchdog check, an interactive ecosystem map on the Help page, and a handful of fixes found while auditing the cross-plugin event chain end-to-end. Pure additions — nothing existing changed behavior.

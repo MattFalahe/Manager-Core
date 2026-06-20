@@ -421,21 +421,21 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <div class="signature">{{ trans('manager-core::help.creator_note_signature') }}</div>
                 </div>
 
-                {{-- What's New in v1.0.1 — upgrade highlights box. Sits under
-                     the creator note so operators upgrading from v1.0.0 land
-                     on the delta-from-the-foundation-release callout before
+                {{-- What's New in v1.0.2 — upgrade highlights box. Sits under
+                     the creator note so operators upgrading from v1.0.1 land
+                     on the delta-from-the-previous-release callout before
                      diving into the broader plugin description below. Uses
                      the suite-wide .whats-new-box style (mirrors SM/MM). --}}
                 <div class="whats-new-box">
                     <h4>
                         <i class="fas fa-sparkles"></i>
-                        {{ trans('manager-core::help.whats_new_v101_title') }}
+                        {{ trans('manager-core::help.whats_new_v102_title') }}
                     </h4>
-                    <p>{!! trans('manager-core::help.whats_new_v101_intro') !!}</p>
-                    {!! trans('manager-core::help.whats_new_v101_list') !!}
+                    <p>{!! trans('manager-core::help.whats_new_v102_intro') !!}</p>
+                    {!! trans('manager-core::help.whats_new_v102_list') !!}
                     <p style="margin-top: 12px; margin-bottom: 0; font-size: 0.88rem; color: #8b95a5;">
                         <i class="fas fa-info-circle"></i>
-                        {!! trans('manager-core::help.whats_new_v101_upgrade_note') !!}
+                        {!! trans('manager-core::help.whats_new_v102_upgrade_note') !!}
                     </p>
                 </div>
 

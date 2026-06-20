@@ -14,9 +14,9 @@ Manager Core is the optional hub that every other plugin in the ecosystem can in
 
 ---
 
-## 🎉 What's in v1.0.1
+## 🎉 What's in v1.0.2
 
-**Polish pass on top of v1.0.0.** Two themes: a major accuracy pass on the Plugin Bridge (the ecosystem map and Plugin Connections tab now honestly reflect what's wired to what), and a Topics registry expansion to 59 entries so every event the suite publishes is first-class. Plus the `plugin_updates_available` Watchdog check (alerts you when a plugin has a new Packagist release, 7-day per-version cooldown), an interactive "what would I lose without X" ecosystem map on the Help page, and fixes found while auditing the cross-plugin event chain end-to-end. Full details in [CHANGELOG.MD](CHANGELOG.MD).
+**Doctrine-compliance wiring on top of v1.0.1.** Structure Manager's new structure-doctrine compliance feature is now first-class in the ecosystem: MC registers the `structure.doctrine.changed` Topic (the registry is now 60 entries) and the `compliance.getForCorporation` bridge wiring, so HR Manager (in preparation, not yet released) can render per-corp doctrine compliance inside Corp Health once it ships. Plus a Help page accuracy pass: the Connected Plugins descriptions now track each plugin's real Packagist release status, so the released plugins describe what they publish and consume today while the not-yet-released ones (Buyback Manager, HR Manager) are shown as in preparation. Pure additions, no schema or behavior changes. Full details in [CHANGELOG.MD](CHANGELOG.MD).
 
 ### Hub services every plugin can use
 
@@ -87,17 +87,17 @@ Or visit **Manager Core → Diagnostics** in the SeAT sidebar.
 
 ## 🔌 Compatible plugins
 
-Status as of v1.0.1 (all 8 integrating; the Plugin Bridge's 6-state model shows each one's live wiring on the ecosystem map):
+Status as of v1.0.2. Five plugins are released on Packagist and integrate today; **Buyback Manager and HR Manager are in preparation** (MC is already wired for them, but they are not yet released), and Industry Manager is still in development. The Plugin Bridge's 6-state model shows each installed plugin's live wiring on the ecosystem map:
 
 | Plugin | Integration state | What it does with MC |
 |---|---|---|
 | [Mining Manager](https://github.com/MattFalahe/mining-manager) | ✅ Active | Publishes `mining.*` events (incl. the `mining.extraction_*` moon lifecycle), consumes `structure.alert.*` for extraction-risk warnings, reads pricing via PluginBridge |
-| [Structure Manager](https://github.com/MattFalahe/Structure-Manager) | ✅ Active | Publishes 9 `structure.alert.*` flavors + `structure_manager.timer.*`, registers an ESI notification handler with MC's key pool for ~2 min detection |
-| [Corp Wallet Manager](https://github.com/MattFalahe/Corp-Wallet-Manager) | ✅ Active | Publishes `member.*` milestones + `wallet.*` signals consumed by HR Manager; exposes 15 read-only ratting / contribution capabilities |
+| [Structure Manager](https://github.com/MattFalahe/Structure-Manager) | ✅ Active | Publishes 9 `structure.alert.*` flavors + `structure_manager.timer.*` + `structure.doctrine.changed`, exposes the `compliance.getForCorporation` capability (for HR Manager, in preparation), registers an ESI notification handler with MC's key pool for ~2 min detection |
+| [Corp Wallet Manager](https://github.com/MattFalahe/Corp-Wallet-Manager) | ✅ Active | Publishes `member.*` milestones + `wallet.*` signals (for HR Manager, in preparation); exposes 15 read-only ratting / contribution capabilities |
 | [SeAT Broadcast](https://github.com/MattFalahe/SeAT-Discord-Pings) (`seat-discord-pings`) | ✅ Active | Subscribes to `structure_manager.timer.*` + `mining.extraction_*` to populate its FC Opportunities board; publishes `pings.broadcast.sent` + `pings.formup.scheduled` |
-| [HR Manager](https://github.com/MattFalahe/HR-Manager) | ✅ Active | Subscribes to `mining.*`, `member.*`, `wallet.*`, `blueprint.request.*` for the player classifier; publishes its `hr.*` lifecycle catalog; consumes CWM's capabilities |
-| [Blueprint Manager](https://github.com/MattFalahe/Blueprint-Manager) | ✅ Active | Publishes `blueprint.request.*` lifecycle events consumed by HR Manager; exposes 2 read-only capabilities |
-| [Buyback Manager](https://github.com/MattFalahe/Buyback-Manager) | ✅ Active | Reads pricing via PluginBridge; publishes `buyback.*` events |
+| [HR Manager](https://github.com/MattFalahe/HR-Manager) | 🔜 In preparation | Not yet released on Packagist. Once it ships it will subscribe to `mining.*`, `member.*`, `wallet.*`, `blueprint.request.*` for the player classifier, publish its `hr.*` lifecycle catalog, and consume CWM + Structure Manager (`compliance.getForCorporation`, structure compliance inside Corp Health) capabilities. MC's Topics and bridge are already wired for it |
+| [Blueprint Manager](https://github.com/MattFalahe/Blueprint-Manager) | ✅ Active | Publishes `blueprint.request.*` lifecycle events (for HR Manager, in preparation); exposes 2 read-only capabilities |
+| [Buyback Manager](https://github.com/MattFalahe/Buyback-Manager) | 🔜 In preparation | Not yet released on Packagist. Once it ships it will read pricing via PluginBridge and publish `buyback.*` offer/contract events. MC already routes pricing for it |
 
 Plugins detect MC at boot via `class_exists(\ManagerCore\Topics::class)`. Installing or uninstalling MC never breaks any plugin — integrations come online or fall back automatically.
 

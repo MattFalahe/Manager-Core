@@ -310,6 +310,19 @@ class Topics
                 'description' => 'An entosis capture started or command nodes spawned — react NOW.',
             ],
 
+            // 2026-06-16: doctrine-compliance change signal. Published directly
+            // via EventBus by StructureDoctrineController when a structure
+            // doctrine (or a compliance setting) changes. Consumers (HR Manager)
+            // subscribe to invalidate any cached compliance view. SM also
+            // exposes the full report as the PluginBridge capability
+            // structure-manager:compliance.getForCorporation.
+            'structure.doctrine.changed' => [
+                'publisher' => 'structure-manager',
+                'required' => [],
+                'idempotency_template' => 'structure.doctrine.changed:{scope_type}:{scope_id}:{action}',
+                'description' => 'A structure-fitting doctrine (or a compliance setting) changed in Structure Manager. Payload carries scope_type/scope_id, optional structure_type_id + security_band, and action (created/updated/deleted/settings). Consumers re-pull compliance via the structure-manager:compliance.getForCorporation capability.',
+            ],
+
             // -------- Wallet (Corp Wallet Manager) --------
             'wallet.transaction_detected' => [
                 'publisher' => 'corp-wallet-manager',

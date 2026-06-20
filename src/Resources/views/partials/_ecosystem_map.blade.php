@@ -121,6 +121,7 @@
                 { f:'cwm', t:'hr', mc:true, k:'data', l:'member contribution and wallet signals, the Corp Health Economy tab and the wallet-audit panel' },
                 { f:'mm', t:'hr', mc:true, k:'data', l:'the mining activity timeline and corp ore-op attendance' },
                 { f:'pings', t:'hr', mc:true, k:'data', l:'FC activity and the fleet-commander roster' },
+                { f:'sm', t:'hr', mc:true, k:'data', l:'the structure-compliance tab on Corp Health (per-structure doctrine compliance vs alliance fits)' },
                 { f:'sm', t:'mm', mc:true, k:'data', l:'extraction at-risk / lost alerts when a structure is attacked' },
                 { f:'sm', t:'pings', mc:true, k:'data', l:'structure timers on the fleet calendar' },
                 { f:'mm', t:'pings', mc:true, k:'data', l:'mining extractions on the FC opportunities board' },
