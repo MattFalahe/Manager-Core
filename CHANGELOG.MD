@@ -4,6 +4,16 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 
 ---
 
+## [1.0.3] - CWM Corp Financial Summary (docs)
+
+Documentation-only patch tracking Corp Wallet Manager v3.1.0's new `wallet.getCorpSummary` Plugin Bridge capability. No MC code or behavior changes: the Plugin Bridge routes capabilities generically and discovers newly-registered ones live, so MC needed nothing beyond keeping its ecosystem docs accurate.
+
+### 📖 Documentation accuracy
+
+- **Connected Plugins (Help) + README plugin table** now report Corp Wallet Manager exposing **16** read-only Plugin Bridge capabilities (was 15), including (v3.1) the corp financial summary `wallet.getCorpSummary` (live wallet balance + income / expense / net + per-month trend). HR Manager (in preparation) consumes it for a Corp Health Economy "financial pulse" strip.
+
+---
+
 ## [1.0.2] - Doctrine Compliance Wiring
 
 Patch release on top of v1.0.1. Wires Structure Manager's new structure-doctrine compliance feature into the ecosystem (one new Topic plus the bridge capability) so HR Manager, in preparation, can render per-corp compliance on its Corp Health page once it ships, and brings the Help page's Connected Plugins descriptions in line with each plugin's real Packagist release status (released plugins describe what they do today; not-yet-released plugins are shown as in preparation). Pure additions: one new Topic plus refreshed documentation, with no schema changes and no behavior changes to anything already wired.
