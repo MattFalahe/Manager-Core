@@ -213,14 +213,17 @@ class Topics
             // ingest these into their tactical-event calendar, fire pre-expiry
             // reminder pings, and prune on expired.
             //
-            // eve_time for the calendar = window_closes_at (= fractured_at + 48h),
-            // i.e. when the ready window ends. window_opens_at and unstable_starts_at
-            // are also in the payload for richer renders.
+            // eve_time for the calendar = window_closes_at, when the ready window
+            // ends: fracture + 48h, or 72h / 96h when the refinery has a Moon
+            // Drilling Stability or Proficiency rig. Take it from the payload rather
+            // than adding 48h, since the window differs chunk by chunk.
+            // window_opens_at, unstable_starts_at and mining_window_hours are also
+            // in the payload for richer renders.
             'mining.extraction_ready' => [
                 'publisher' => 'mining-manager',
                 'required' => ['extraction_id'],
                 'idempotency_template' => 'extraction_ready:{extraction_id}',
-                'description' => 'A moon extraction transitioned to the ready window (chunk fractured, 48h fleet-able mining begins).',
+                'description' => 'A moon extraction transitioned to the ready window (chunk fractured, its mining window begins: 48h, or 72h / 96h with a Moon Drilling Stability or Proficiency rig).',
             ],
             'mining.extraction_unstable' => [
                 'publisher' => 'mining-manager',
@@ -232,7 +235,7 @@ class Topics
                 'publisher' => 'mining-manager',
                 'required' => ['extraction_id'],
                 'idempotency_template' => 'extraction_expired:{extraction_id}',
-                'description' => 'A moon extraction has expired (past 50h after fracture, window closed).',
+                'description' => 'A moon extraction has expired (past its mining window and the 2h unstable tail, window closed).',
             ],
 
             // -------- Structure Manager --------

@@ -4,6 +4,14 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 
 ---
 
+## [Unreleased]
+
+### 📖 Documentation accuracy
+
+- **Moon extraction topics.** Mining Manager now gives each chunk the mining window its refinery's moon drilling rigs allow: 48 hours, or 72 / 96 hours with a Moon Drilling Stability or Proficiency rig. The `mining.extraction_ready` and `mining.extraction_expired` descriptions in the Topic Matrix no longer say a flat 48h / 50h. The payload is unchanged apart from two new fields Mining Manager adds, `mining_window_hours` and `timer_rig_tier`; `window_closes_at` already carries the right time for each chunk.
+
+---
+
 ## [1.0.3] - CWM Corp Financial Summary (docs)
 
 Documentation-only patch tracking Corp Wallet Manager v3.1.0's new `wallet.getCorpSummary` Plugin Bridge capability. No MC code or behavior changes: the Plugin Bridge routes capabilities generically and discovers newly-registered ones live, so MC needed nothing beyond keeping its ecosystem docs accurate.
