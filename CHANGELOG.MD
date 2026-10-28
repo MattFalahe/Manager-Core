@@ -6,6 +6,16 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### 🎉 Compatible Plugins on the Plugin Bridge page
+
+- **Plugins outside the suite now show up.** A plugin that registers itself with `registerSelf()`, like SeAT Timerboard, gets its own Compatible Plugins table under the Plugin Registry: state, version badge, integrations, last activity and last seen, with the same expandable details. The ecosystem map and the Plugin Registry still list the suite only. Until now `registerSelf()` saved the plugin's registry row, but the page never showed it.
+- **Diagnostics lists them too,** under Compatible plugins on the Plugin Connections tab, and Test All Plugins covers them.
+
+### 🐛 Fixes
+
+- **Active Plugins count on Diagnostics.** It showed every active registry row over the size of the suite list, so a self-registered plugin pushed it past the total (8 / 7). Both numbers now cover the same plugins.
+- **Plugin Connections tests** now run against a fresh Plugin Bridge scan, as the Plugin Bridge page does. The cached scan is built while Manager Core boots, before the plugins that load after it have registered their ESI handlers, so Mining Manager and Structure Manager tested with no ESI handlers, and a plugin wired only through ESI tested as Standalone.
+
 ### 📖 Documentation accuracy
 
 - **Moon extraction topics.** Mining Manager now gives each chunk the mining window its refinery's moon drilling rigs allow: 48 hours, or 72 / 96 hours with a Moon Drilling Stability or Proficiency rig. The `mining.extraction_ready` and `mining.extraction_expired` descriptions in the Topic Matrix no longer say a flat 48h / 50h. The payload is unchanged apart from two new fields Mining Manager adds, `mining_window_hours` and `timer_rig_tier`; `window_closes_at` already carries the right time for each chunk.

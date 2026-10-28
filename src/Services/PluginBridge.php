@@ -34,6 +34,15 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
     protected $plugins = [];
 
     /**
+     * Plugins from outside the suite that announced themselves with
+     * registerSelf(). Kept apart from $plugins so the ecosystem map, the
+     * Plugin Registry table and getStatistics() still describe the suite.
+     *
+     * @var array
+     */
+    protected $externalPlugins = [];
+
+    /**
      * Plugin capabilities registry
      *
      * @var array
@@ -111,18 +120,30 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         }
         Cache::put(self::CACHE_KEY . ':signature', $signature, ($cacheDuration * 60) * 24);
 
-        $this->plugins = Cache::remember(self::CACHE_KEY, $cacheDuration * 60, function () {
+        $discovered = Cache::remember(self::CACHE_KEY, $cacheDuration * 60, function () {
             return $this->scanForPlugins();
         });
 
+        // One scan covers both lists. Outside plugins carry 'external' => true.
+        $this->plugins = [];
+        $this->externalPlugins = [];
+        foreach ($discovered as $pluginKey => $plugin) {
+            if (!empty($plugin['external'])) {
+                $this->externalPlugins[$pluginKey] = $plugin;
+            } else {
+                $this->plugins[$pluginKey] = $plugin;
+            }
+        }
+
         // Always flush pending capabilities for any plugin that appeared
-        foreach (array_keys($this->plugins) as $pluginKey) {
+        foreach (array_keys($discovered) as $pluginKey) {
             if (!empty($this->pendingCapabilities[$pluginKey])) {
                 $this->flushPendingCapabilities($pluginKey);
             }
         }
 
-        Log::debug('[Manager Core] Plugin Bridge discovered ' . count($this->plugins) . ' plugins');
+        Log::debug('[Manager Core] Plugin Bridge discovered ' . count($this->plugins) . ' plugins and '
+            . count($this->externalPlugins) . ' from outside the suite');
     }
 
     /**
@@ -134,6 +155,10 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
     {
         $discoveredPlugins = [];
         $compatiblePlugins = config('manager-core.bridge.compatible_plugins', []);
+
+        // Plugins from outside the suite, from the rows registerSelf() wrote.
+        // They go through the same signals and states as the suite.
+        $externalPlugins = $this->getSelfRegisteredPlugins($compatiblePlugins);
 
         // Pricing-type subscriptions
         $activeSubscriptions = $this->getActivePricingSubscriptionCounts();
@@ -165,7 +190,8 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         $errorCounts  = $this->getSubscriberErrorCounts(60);
         $openCircuits = $this->getOpenCircuitCounts();
 
-        foreach ($compatiblePlugins as $pluginKey => $pluginConfig) {
+        foreach ($compatiblePlugins + $externalPlugins as $pluginKey => $pluginConfig) {
+            $external = isset($externalPlugins[$pluginKey]);
             $providerClass = $pluginConfig['class'] ?? null;
             $subscriptionName = $pluginConfig['subscription_name'] ?? null;
 
@@ -246,11 +272,17 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
                 // if the plugin has never published or received an event.
                 'last_published_at' => $lastPublishedAt[$pluginKey] ?? null,
                 'last_received_at'  => $lastReceivedAt[$pluginKey] ?? null,
+                'subscription_name' => $subscriptionName,
+                'external' => $external,
             ];
 
             // Update database registry
             if ($installed) {
-                $this->updateRegistry($pluginKey, $providerClass, $status, $integrationCount, $state);
+                // An outside plugin's row holds the name, package and icon it
+                // registered with, which updateRegistry() would overwrite.
+                if (!$external) {
+                    $this->updateRegistry($pluginKey, $providerClass, $status, $integrationCount, $state);
+                }
 
                 // Now that the registry row exists, flush any buffered capabilities
                 $this->flushPendingCapabilities($pluginKey);
@@ -263,6 +295,53 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         }
 
         return $discoveredPlugins;
+    }
+
+    /**
+     * Registry rows that registerSelf() wrote for plugins outside the suite,
+     * shaped like compatible_plugins entries so scanForPlugins() can treat
+     * both the same way.
+     *
+     * A row is left out when the plugin is part of the suite, when its class
+     * no longer loads (the plugin was removed), when the cleanup command has
+     * deactivated it, or when its key isn't a plain slug. The key ends up in
+     * URLs and element ids.
+     *
+     * @param array $compatiblePlugins
+     * @return array [plugin_key => ['name', 'class', 'package', 'icon', 'subscription_name']]
+     */
+    protected function getSelfRegisteredPlugins(array $compatiblePlugins): array
+    {
+        try {
+            $rows = PluginRegistry::where('is_active', true)->orderBy('plugin_name')->get();
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        $plugins = [];
+        foreach ($rows as $row) {
+            $key = (string) $row->plugin_name;
+            $meta = is_array($row->metadata) ? $row->metadata : [];
+
+            if (empty($meta['self_registered'])
+                || isset($compatiblePlugins[$key])
+                || $key === 'manager-core'
+                || !preg_match('/^[a-z0-9][a-z0-9_.-]*$/', $key)
+                || !$row->plugin_class
+                || !class_exists($row->plugin_class)) {
+                continue;
+            }
+
+            $plugins[$key] = [
+                'name' => (string) ($meta['name'] ?? $key),
+                'class' => $row->plugin_class,
+                'package' => (string) ($meta['package'] ?? $key),
+                'icon' => (string) ($meta['icon'] ?? 'fa-puzzle-piece'),
+                'subscription_name' => $meta['subscription_name'] ?? null,
+            ];
+        }
+
+        return $plugins;
     }
 
     /**
@@ -759,7 +838,8 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
      * M10: Self-register a plugin with the bridge at runtime.
      *
      * Plugins NOT listed in the hardcoded compatible_plugins config can call
-     * this from their service-provider boot() to appear in the bridge UI.
+     * this from their service-provider boot() to appear in the bridge UI,
+     * under Compatible Plugins on the Plugin Bridge page and in Diagnostics.
      * The plugin's package, name, icon, and provider class are persisted to
      * PluginRegistry so the discover() pass picks them up on the next scan.
      *
@@ -909,6 +989,18 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
     public function getPlugins()
     {
         return $this->plugins;
+    }
+
+    /**
+     * Plugins from outside the suite that registered themselves, with the
+     * same fields as getPlugins() plus 'external' => true. Filled by
+     * discover(); the Plugin Bridge page lists them under Compatible Plugins.
+     *
+     * @return array
+     */
+    public function getExternalPlugins()
+    {
+        return $this->externalPlugins;
     }
 
     /**

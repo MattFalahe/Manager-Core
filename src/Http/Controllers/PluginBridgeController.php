@@ -40,6 +40,8 @@ class PluginBridgeController extends Controller
 
         $statistics = $this->bridge->getStatistics();
         $plugins = $this->bridge->getPlugins();
+        // Plugins from outside the suite, for the Compatible Plugins table.
+        $externalPlugins = $this->bridge->getExternalPlugins();
         $registeredPlugins = PluginRegistry::orderBy('plugin_name')->get();
 
         // 2026-05-12: worker-context registry snapshots. The bridge view
@@ -58,7 +60,7 @@ class PluginBridgeController extends Controller
 
         // Per-plugin detail for the expandable Plugin Registry rows:
         // exact capabilities, subscription patterns, recent events, errors.
-        $pluginDetails = $this->gatherPluginDetails($plugins, $registeredPlugins);
+        $pluginDetails = $this->gatherPluginDetails($plugins + $externalPlugins, $registeredPlugins);
 
         // Per-plugin version status — installed vs latest-on-Packagist.
         // Powers the version badges on the ecosystem map + Plugin Registry
@@ -67,8 +69,9 @@ class PluginBridgeController extends Controller
         // so a Packagist hiccup doesn't break the page.
         $versionStatus = [];
         try {
-            $versionStatus = app(\ManagerCore\Services\EcosystemVersionChecker::class)
-                ->getStatusForAllPlugins();
+            $checker = app(\ManagerCore\Services\EcosystemVersionChecker::class);
+            $versionStatus = $checker->getStatusForAllPlugins()
+                + $checker->getStatusForExternalPlugins($externalPlugins);
         } catch (\Throwable $e) {
             // Service constructor failed (highly unusual) — degrade to
             // empty map. View conditionally renders badges only when data exists.
@@ -78,6 +81,7 @@ class PluginBridgeController extends Controller
         return view('manager-core::bridge.index', compact(
             'statistics',
             'plugins',
+            'externalPlugins',
             'registeredPlugins',
             'workerSnapshots',
             'pluginDetails',
@@ -213,7 +217,9 @@ class PluginBridgeController extends Controller
     public function refreshVersions()
     {
         try {
-            app(EcosystemVersionChecker::class)->clearCache();
+            $checker = app(EcosystemVersionChecker::class);
+            $checker->clearCache();
+            $checker->clearCacheForExternalPlugins($this->bridge->getExternalPlugins());
             return response()->json([
                 'success' => true,
                 'message' => 'Version cache flushed. Reloading the page will fetch fresh Packagist data for every plugin.',

@@ -9,7 +9,9 @@ use Illuminate\Support\Facades\Http;
 /**
  * Resolve installed vs latest-on-Packagist versions for every plugin
  * in MC's `compatible_plugins` config — powers the version badges on
- * the Plugin Bridge page (ecosystem map + Plugin Registry table).
+ * the Plugin Bridge page (ecosystem map + Plugin Registry table). Outside
+ * plugins that registered themselves get theirs through
+ * getStatusForExternalPlugins(), for the Compatible Plugins table.
  *
  * Mirrors the per-plugin VersionChecker pattern (introduced in SeAT
  * Broadcast, then ported to SM + MM): one call answers "is this plugin
@@ -58,6 +60,12 @@ class EcosystemVersionChecker
     private const MANAGER_CORE_PACKAGE = 'mattfalahe/manager-core';
 
     /**
+     * Composer's own package name rule. Outside plugins supply their package
+     * name themselves, and it ends up in the Packagist URL.
+     */
+    private const PACKAGE_NAME_PATTERN = '#^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$#';
+
+    /**
      * Return a status map for EVERY plugin in compatible_plugins config
      * PLUS Manager Core itself.
      *
@@ -79,6 +87,31 @@ class EcosystemVersionChecker
         // Synthesize MC's own status — bypass the compatible_plugins
         // lookup since MC isn't in that map.
         $out[self::MANAGER_CORE_KEY] = $this->getStatusForManagerCore();
+        return $out;
+    }
+
+    /**
+     * Version status for plugins from outside the suite, keyed by plugin
+     * like getStatusForAllPlugins(). That method stays suite-only because
+     * the plugin_updates_available Watchdog check reads it, and its alerts
+     * are about the suite.
+     *
+     * A plugin whose registered package isn't a valid Composer name gets no
+     * entry, so the page shows no badge for it.
+     *
+     * @param array $plugins From PluginBridge::getExternalPlugins()
+     * @return array<string, array>
+     */
+    public function getStatusForExternalPlugins(array $plugins): array
+    {
+        $out = [];
+        foreach ($plugins as $pluginKey => $plugin) {
+            $package = (string) ($plugin['package'] ?? '');
+            if (!$this->isValidPackageName($package)) {
+                continue;
+            }
+            $out[$pluginKey] = $this->statusForKnownPackage((string) $pluginKey, $package);
+        }
         return $out;
     }
 
@@ -282,6 +315,26 @@ class EcosystemVersionChecker
             }
         }
         Cache::forget(self::CACHE_PREFIX . self::MANAGER_CORE_PACKAGE);
+    }
+
+    /**
+     * clearCache() for outside plugins, which aren't in compatible_plugins.
+     *
+     * @param array $plugins From PluginBridge::getExternalPlugins()
+     */
+    public function clearCacheForExternalPlugins(array $plugins): void
+    {
+        foreach ($plugins as $plugin) {
+            $package = (string) ($plugin['package'] ?? '');
+            if ($this->isValidPackageName($package)) {
+                Cache::forget(self::CACHE_PREFIX . $package);
+            }
+        }
+    }
+
+    protected function isValidPackageName(string $package): bool
+    {
+        return preg_match(self::PACKAGE_NAME_PATTERN, $package) === 1;
     }
 
     /**

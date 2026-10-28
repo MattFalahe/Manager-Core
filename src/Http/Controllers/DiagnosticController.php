@@ -50,13 +50,23 @@ class DiagnosticController extends Controller
             try { return $query(); } catch (\Exception $e) { return $default; }
         };
 
+        // Fresh discovery, as on the Plugin Bridge page: the map cached at boot
+        // is often built before later plugins have registered their ESI handlers.
+        $this->bridge->discover(true);
+        $externalPlugins = $this->bridge->getExternalPlugins();
+        $discovered = $this->bridge->getPlugins() + $externalPlugins;
+
         $summary = [
             'price_records' => $safe(fn() => MarketPrice::count()),
             'unique_types' => $safe(fn() => MarketPrice::distinct('type_id')->count('type_id')),
             'subscriptions' => $safe(fn() => TypeSubscription::count()),
             'subscribing_plugins' => $safe(fn() => TypeSubscription::distinct('plugin_name')->count('plugin_name')),
-            'active_plugins' => $safe(fn() => PluginRegistry::where('is_active', true)->count()),
-            'total_plugins' => count(config('manager-core.bridge.compatible_plugins', [])),
+            // Both numbers cover the same plugins: the suite plus the outside
+            // plugins that registered themselves. Counting registry rows over
+            // the size of compatible_plugins let outside plugins push the first
+            // number past the second.
+            'active_plugins' => count(array_filter($discovered, fn ($p) => ($p['status'] ?? '') === 'active')),
+            'total_plugins' => count(config('manager-core.bridge.compatible_plugins', [])) + count($externalPlugins),
             'event_subscriptions' => $safe(fn() => EventSubscription::active()->count()),
             'events_today' => $safe(fn() => EventLog::where('created_at', '>=', now()->startOfDay())->count()),
             'api_tokens' => $safe(fn() => ApiToken::where('is_active', true)->count()),
@@ -75,7 +85,7 @@ class DiagnosticController extends Controller
         // diagnostics too, not just hide them.
         $markets = Market::getEffectiveMarkets(false);
 
-        return view('manager-core::diagnostic.index', compact('summary', 'plugins', 'markets'));
+        return view('manager-core::diagnostic.index', compact('summary', 'plugins', 'externalPlugins', 'markets'));
     }
 
     /**
@@ -120,8 +130,21 @@ class DiagnosticController extends Controller
      */
     public function testPluginConnection(string $pluginKey): JsonResponse
     {
+        // Fresh discovery, as on the Plugin Bridge page: the map cached at boot
+        // is often built before later plugins have registered their ESI handlers.
+        $this->bridge->discover(true);
+
+        return $this->pluginConnectionResult($pluginKey);
+    }
+
+    /**
+     * One plugin's connection test, against the bridge's current discovery.
+     */
+    private function pluginConnectionResult(string $pluginKey): JsonResponse
+    {
         $start = microtime(true);
-        $config = config("manager-core.bridge.compatible_plugins.{$pluginKey}");
+        $external = $this->bridge->getExternalPlugins()[$pluginKey] ?? null;
+        $config = config("manager-core.bridge.compatible_plugins.{$pluginKey}") ?? $external;
 
         if (!$config) {
             return response()->json([
@@ -155,7 +178,7 @@ class DiagnosticController extends Controller
             $result['issues'][] = "Service provider class not found: {$config['class']}";
         } else {
             // Check bridge registration
-            $bridgePlugin = $this->bridge->getPlugin($pluginKey);
+            $bridgePlugin = $this->bridge->getPlugin($pluginKey) ?? $external;
             $result['bridge_registered'] = $bridgePlugin !== null;
 
             if (!$result['bridge_registered']) {
@@ -209,11 +232,14 @@ class DiagnosticController extends Controller
      */
     public function testAllPlugins(): JsonResponse
     {
-        $plugins = config('manager-core.bridge.compatible_plugins', []);
+        // One fresh discovery for the whole run (see testPluginConnection).
+        $this->bridge->discover(true);
+
+        $plugins = config('manager-core.bridge.compatible_plugins', []) + $this->bridge->getExternalPlugins();
         $results = [];
 
         foreach ($plugins as $key => $config) {
-            $response = $this->testPluginConnection($key);
+            $response = $this->pluginConnectionResult($key);
             $data = json_decode($response->getContent(), true);
             $results[$key] = $data['data'] ?? ['status' => 'error'];
         }

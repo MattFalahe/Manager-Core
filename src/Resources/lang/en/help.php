@@ -251,6 +251,7 @@ return [
         <li><strong>Self-introspection:</strong> The bridge exposes <code>bridge.discoverCapabilities</code> so any plugin can enumerate what is currently callable</li>
         <li><strong>Capability versioning:</strong> Callers can require a minimum version via <code>bridge.requireMinimumVersion</code> for forward-compatible upgrades</li>
         <li><strong>Stale entry pruning:</strong> Capabilities whose owning plugin is no longer loadable are removed automatically on the next discover() pass</li>
+        <li><strong>Compatible plugins:</strong> Plugins outside the suite that announce themselves with <code>registerSelf()</code> get their own Compatible Plugins table under the Plugin Registry, with the same state, version and integration columns. Diagnostics lists them on the Plugin Connections tab too</li>
     </ul>',
 
     'plugin_status_title' => 'Plugin Status Indicators',
