@@ -17,10 +17,12 @@ use ManagerCore\Models\EventSubscription;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 use ManagerCore\Models\PluginRegistry;
+use ManagerCore\Models\PricingPreference;
 use ManagerCore\Models\Setting;
 use ManagerCore\Models\TypeSubscription;
 use ManagerCore\Services\EventBus;
 use ManagerCore\Services\PluginBridge;
+use ManagerCore\Services\PriceProviders\JanicePriceProvider;
 use ManagerCore\Services\PricingService;
 use ManagerCore\Services\SdeService;
 use ManagerCore\Services\Watchdog\WatchdogService;
@@ -1169,10 +1171,25 @@ class DiagnosticController extends Controller
                 return ['status' => 'fail', 'message' => 'Market(s) using unknown provider: ' . implode(', ', $unknownProviders)];
             }
 
+            // A plugin's provider override reaches Janice without any market
+            // routing through it.
+            if (!$needsJaniceKey) {
+                $needsJaniceKey = PricingPreference::where('provider_override', 'janice')->exists();
+            }
+
             if ($needsJaniceKey) {
                 $key = Setting::get('pricing.janice_api_key') ?? config('manager-core.pricing.janice.api_key');
                 if (empty($key)) {
-                    return ['status' => 'fail', 'message' => 'A market routes through Janice but no API key is configured. Set it at Settings → Pricing.'];
+                    return ['status' => 'fail', 'message' => 'A market or a plugin override routes through Janice but no API key is configured. Set it at Settings → Pricing.'];
+                }
+
+                // A key can be set and still be turned away.
+                $failure = JanicePriceProvider::lastFailure();
+                if ($failure !== null) {
+                    $since = $failure['since'] ? Carbon::parse($failure['since'])->utc()->format('Y-m-d H:i') . ' UTC' : 'its last fetch';
+                    return $failure['state'] === 'refused'
+                        ? ['status' => 'fail', 'message' => ($failure['error'] ?? 'Janice refused the request') . ", since {$since}. Prices it should fetch keep their cached value. Fix the key at Settings → Pricing, then test Janice on the Price Providers tab."]
+                        : ['status' => 'warn', 'message' => "Every request of Janice's last fetch failed, since {$since}. Prices it should fetch keep their cached value until it answers again.", 'detail' => $failure['error'] ?? null];
                 }
             }
 

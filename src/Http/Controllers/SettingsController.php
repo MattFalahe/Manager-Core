@@ -135,6 +135,12 @@ class SettingsController extends Controller
                 $oldValue = null;
             }
             \ManagerCore\Models\SettingsAudit::record($key, $oldValue, $value, 'settings_ui');
+
+            // Janice has not turned a new key away yet, so the last refusal
+            // stops describing it the moment the key changes.
+            if ($key === 'pricing.janice_api_key' && $oldValue !== $value) {
+                Setting::remove(\ManagerCore\Services\PriceProviders\JanicePriceProvider::STATUS_KEY);
+            }
         }
 
         // H5: clear bridge discovery cache since auto_discover or related state may have changed

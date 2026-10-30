@@ -305,10 +305,10 @@ class WatchdogService
                     'label' => 'Provider unavailable (sample)',
                     'alert' => [
                         'title' => 'Price provider unavailable (sample)',
-                        'message' => "SAMPLE: Configured but unavailable on enabled markets: janice. Check credentials at MC → Settings (Janice key, Goonpraisal email, SeAT sub-provider chain). See Diagnostics → Price Providers for live test buttons.",
+                        'message' => "SAMPLE: Configured but unavailable: janice: Janice refused the request with HTTP 401 (check the API key), since 2026-10-30 14:00 UTC. Prices those providers should fetch keep their cached value meanwhile. Check credentials at MC → Settings (Janice key, Goonpraisal email, SeAT sub-provider chain). See Diagnostics → Price Providers for live test buttons.",
                         'severity' => 'warning',
                         'context' => [
-                            'unavailable_providers' => 'janice',
+                            'unavailable_providers' => 'janice: Janice refused the request with HTTP 401 (check the API key), since 2026-10-30 14:00 UTC',
                             'providers_in_use' => 'fuzzwork, janice, goonpraisal',
                             'note' => 'SAMPLE — not a real condition',
                         ],

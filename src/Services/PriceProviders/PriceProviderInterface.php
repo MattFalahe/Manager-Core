@@ -30,7 +30,7 @@ interface PriceProviderInterface
      *                        results to manager_core_market_prices via
      *                        updateOrCreate — the path the scheduled cron
      *                        wants for the shared cache. When false, the
-     *                        provider must NOT touch the DB — the
+     *                        provider must NOT write prices or history — the
      *                        per-plugin provider_override path passes
      *                        false to avoid polluting the cache with one
      *                        plugin's override data (which would corrupt

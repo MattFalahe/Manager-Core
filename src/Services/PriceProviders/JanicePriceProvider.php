@@ -4,6 +4,7 @@ namespace ManagerCore\Services\PriceProviders;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use ManagerCore\Models\Market;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 use ManagerCore\Models\Setting;
@@ -11,29 +12,62 @@ use ManagerCore\Models\Setting;
 /**
  * Janice appraisal-service price provider.
  *
- * Reads from https://janice.e-351.com/api/rest/v2/pricer/{typeId}?market={id}.
- * Janice is an authenticated service — operators must paste an API key from
- * https://janice.e-351.com/ into MC Settings before this provider works.
+ * Posts the type ids to https://janice.e-351.com/api/rest/v2/pricer?market={id}
+ * as plain text, one per line, and gets back one PricerItem per id Janice
+ * knows. Janice is an authenticated service — operators must paste an API key
+ * from https://janice.e-351.com/ into MC Settings before this provider works.
  *
- * Returns BOTH sides on every call (immediatePrices.buyPrice +
+ * Returns BOTH sides on every item (immediatePrices.buyPrice +
  * immediatePrices.sellPrice), so MC's appraisal logic can pick either side.
  *
  * Market params:
  *   '2' = Jita (default)
  *   '1' = Amarr
- * For any non-Jita/Amarr market (hek, dodixie, rens, citadel markets),
- * we fall back to Jita because Janice doesn't track those hubs.
+ * A market routed through Janice names its Janice market in the slug field
+ * ('jita' or 'amarr'), since a custom market's key can be anything. For any
+ * other market (hek, dodixie, rens, citadel markets), we fall back to Jita
+ * because Janice doesn't track those hubs.
  *
- * Per-type call cadence: Janice's pricer endpoint is single-type, so we
- * iterate with a 50ms inter-request delay (matches BB Manager's tested-safe
- * cadence). Subscribers requesting hundreds of types should expect tens of
- * seconds; for that scale the operator probably wants MCPraisal or Fuzzwork.
+ * Why the ids are batched: Janice publishes no rate limit, but its owner
+ * blocks keys for excessive traffic, and asking one price per request made
+ * a refresh of a few hundred types a few hundred requests. The pricer takes
+ * a list and answers with the same prices the per-type endpoint gives.
  */
 class JanicePriceProvider implements PriceProviderInterface
 {
     private const PRICER_URL = 'https://janice.e-351.com/api/rest/v2/pricer';
-    private const HTTP_TIMEOUT = 15;
-    private const RATE_LIMIT_MICROSECONDS = 50000; // 50ms between requests
+    private const HTTP_TIMEOUT = 30;
+
+    /**
+     * Ids per request, and the pause between requests. A large refresh is a
+     * handful of requests at this size, spaced out rather than in a burst.
+     */
+    private const BATCH_SIZE = 100;
+    private const BATCH_PAUSE_MICROSECONDS = 2000000;
+
+    /**
+     * A request that fails (server error, timeout, rejected body) is retried
+     * in halves, at most this many levels deep: one bad id or a blip should
+     * not cost the whole batch.
+     */
+    private const MAX_SPLITS = 3;
+    private const RETRY_PAUSE_MICROSECONDS = 1000000;
+
+    /**
+     * The retreat is what makes a bad run long, up to fifteen requests for one
+     * batch, each on its own timeout. Past this nothing new is asked for, and
+     * whatever is left keeps its cached price until the next run.
+     */
+    private const TIME_BUDGET_SECONDS = 120;
+
+    /** The key, not the batch: wrong or blocked key, or asked too often. */
+    private const REFUSED_STATUSES = [401, 403, 429];
+
+    /**
+     * Janice's last answer. Install-wide rather than per market, because one
+     * key serves every market and every plugin override routed through Janice.
+     */
+    public const STATUS_KEY = 'pricing.janice_status';
 
     /**
      * Markets Janice tracks → URL param. Anything not in this map falls
@@ -45,6 +79,19 @@ class JanicePriceProvider implements PriceProviderInterface
     ];
 
     protected ?string $apiKey;
+
+    /**
+     * Requests that failed outright during the current fetch, and what the
+     * last one said. The retreat swallows those, so without this a Janice
+     * that is down would look the same as types nobody trades.
+     */
+    protected int $requestErrors = 0;
+    protected ?string $lastError = null;
+
+    /** Ids the current fetch gave up on because its time ran out. */
+    protected int $unasked = 0;
+
+    protected float $deadline = 0.0;
 
     public function __construct()
     {
@@ -64,61 +111,181 @@ class JanicePriceProvider implements PriceProviderInterface
             return $out;
         }
 
-        $marketParam = self::MARKET_PARAMS[strtolower($market)] ?? self::MARKET_PARAMS['jita'];
-        if (!isset(self::MARKET_PARAMS[strtolower($market)])) {
-            Log::info("[Manager Core] Janice: market '{$market}' isn't tracked by Janice; falling back to Jita");
-        }
+        $marketParam = $this->marketParam($market);
 
         $persistTag = $persist ? '' : ' (no-persist override mode)';
-        Log::info("[Manager Core] Fetching prices from Janice for " . count($typeIds) . " types in {$market} (param={$marketParam}){$persistTag}");
+        Log::info("[Manager Core] Fetching prices from Janice for " . count($out) . " types in {$market} (param={$marketParam}){$persistTag}");
 
-        $updatedCount = 0;
-        foreach ($typeIds as $typeId) {
-            $tidInt = (int) $typeId;
-            try {
-                $url = sprintf('%s/%d?market=%s', self::PRICER_URL, $typeId, $marketParam);
-                $response = Http::timeout(self::HTTP_TIMEOUT)
-                    ->withHeaders([
-                        'X-ApiKey' => $this->apiKey,
-                        'accept' => 'application/json',
-                    ])
-                    ->get($url);
+        $this->requestErrors = 0;
+        $this->lastError = null;
+        $this->unasked = 0;
+        $this->deadline = $this->clock() + self::TIME_BUDGET_SECONDS;
 
-                if (!$response->successful()) {
-                    Log::warning("[Manager Core] Janice fetch failed for type {$typeId}", [
-                        'status' => $response->status(),
-                    ]);
-                    usleep(self::RATE_LIMIT_MICROSECONDS);
+        $items = [];
+        $refusal = null;
+
+        try {
+            foreach (array_chunk(array_keys($out), self::BATCH_SIZE) as $index => $batch) {
+                if ($this->outOfTime()) {
+                    $this->unasked += count($batch);
                     continue;
                 }
 
-                $data = $response->json();
-                if (!is_array($data)) {
-                    usleep(self::RATE_LIMIT_MICROSECONDS);
-                    continue;
+                if ($index > 0) {
+                    $this->pause(self::BATCH_PAUSE_MICROSECONDS);
                 }
 
-                // Build the in-memory return value first — required by
-                // Option B's no-persist override path.
-                $out[$tidInt] = $this->buildStatsFromJaniceResponse($data);
-                if ($persist) {
-                    $this->storeJaniceRow($typeId, $market, $data);
-                }
-                $updatedCount++;
+                $items += $this->fetchBatch($batch, $marketParam);
+            }
+        } catch (JaniceRefusedException $e) {
+            $refusal = $e;
+            Log::error("[Manager Core] {$e->getMessage()}. Stopped asking Janice for this fetch; anything not fetched keeps its cached price.");
+        }
 
-                usleep(self::RATE_LIMIT_MICROSECONDS);
-            } catch (\Throwable $e) {
-                Log::error("[Manager Core] Janice fetch exception for type {$typeId}: " . $e->getMessage());
+        if ($this->unasked > 0) {
+            Log::warning("[Manager Core] Janice: ran out of time with {$this->unasked} types not asked for; they keep their cached prices until the next run");
+        }
+
+        $answered = 0;
+        foreach ($items as $typeId => $item) {
+            if (!array_key_exists($typeId, $out)) {
                 continue;
+            }
+
+            // Build the in-memory return value first — required by
+            // Option B's no-persist override path.
+            $out[$typeId] = $this->buildStatsFromJaniceResponse($item);
+            if ($out[$typeId]['buy'] === null && $out[$typeId]['sell'] === null) {
+                continue;
+            }
+
+            $answered++;
+            if ($persist) {
+                $this->storeJaniceRow($typeId, $market, $item);
             }
         }
 
-        Log::info("[Manager Core] Janice completed: " . ($persist ? 'updated' : 'fetched') . " {$updatedCount}/" . count($typeIds) . " types in {$market}");
+        $this->recordOutcome($answered, $refusal);
+
+        Log::info("[Manager Core] Janice completed: " . ($persist ? 'updated' : 'fetched') . " {$answered}/" . count($out) . " types in {$market}");
         return $out;
     }
 
     /**
-     * Build the in-memory stats map for one Janice pricer response.
+     * Janice's param for an MC market: the slug of a market routed through
+     * Janice, then the market key itself, then Jita.
+     */
+    protected function marketParam(string $market): string
+    {
+        $slug = null;
+        try {
+            $slug = Market::where('key', $market)->where('provider', 'janice')->value('provider_slug');
+        } catch (\Throwable $e) {
+            // Table missing during install: the key alone still works.
+        }
+
+        foreach ([$slug, $market] as $candidate) {
+            $param = self::MARKET_PARAMS[strtolower(trim((string) $candidate))] ?? null;
+            if ($param !== null) {
+                return $param;
+            }
+        }
+
+        Log::info("[Manager Core] Janice: market '{$market}' isn't tracked by Janice; falling back to Jita");
+        return self::MARKET_PARAMS['jita'];
+    }
+
+    /**
+     * One batch, with a staged retreat when the request itself fails.
+     *
+     * @return array<int, array> PricerItems keyed by type id
+     * @throws JaniceRefusedException
+     */
+    protected function fetchBatch(array $typeIds, string $marketParam, int $depth = 0): array
+    {
+        try {
+            return $this->pricerRequest($typeIds, $marketParam);
+        } catch (JaniceRefusedException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            $this->requestErrors++;
+            $this->lastError = $e->getMessage();
+
+            Log::warning("[Manager Core] Janice request failed", [
+                'ids' => count($typeIds),
+                'depth' => $depth,
+                'error' => $e->getMessage(),
+            ]);
+
+            if (count($typeIds) === 1 || $depth >= self::MAX_SPLITS) {
+                return [];
+            }
+
+            $items = [];
+            foreach (array_chunk($typeIds, (int) ceil(count($typeIds) / 2)) as $piece) {
+                if ($this->outOfTime()) {
+                    $this->unasked += count($piece);
+                    continue;
+                }
+
+                $this->pause(self::RETRY_PAUSE_MICROSECONDS);
+                $items += $this->fetchBatch($piece, $marketParam, $depth + 1);
+            }
+
+            return $items;
+        }
+    }
+
+    /**
+     * The pricer call itself.
+     *
+     * @return array<int, array> PricerItems keyed by type id
+     * @throws JaniceRefusedException when Janice turns the key away
+     * @throws \RuntimeException when the request fails in a way worth retrying
+     */
+    protected function pricerRequest(array $typeIds, string $marketParam): array
+    {
+        $response = Http::timeout(self::HTTP_TIMEOUT)
+            ->withHeaders([
+                'X-ApiKey' => $this->apiKey,
+                'accept' => 'application/json',
+            ])
+            ->withBody(implode("\n", $typeIds), 'text/plain')
+            ->post(self::PRICER_URL . '?market=' . $marketParam);
+
+        if (in_array($response->status(), self::REFUSED_STATUSES, true)) {
+            throw new JaniceRefusedException($response->status());
+        }
+
+        if (!$response->successful()) {
+            throw new \RuntimeException('Janice returned HTTP ' . $response->status());
+        }
+
+        $data = $response->json();
+
+        // A lone PricerItem rather than a list, should a one-id request
+        // ever be answered that way.
+        if (is_array($data) && isset($data['itemType'])) {
+            $data = [$data];
+        }
+
+        if (!is_array($data)) {
+            throw new \RuntimeException('Janice returned something other than a list of prices');
+        }
+
+        $items = [];
+        foreach ($data as $item) {
+            $typeId = is_array($item) ? (int) ($item['itemType']['eid'] ?? 0) : 0;
+            if ($typeId > 0) {
+                $items[$typeId] = $item;
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * Build the in-memory stats map for one Janice PricerItem.
      * Mirrors storeJaniceRow's shape decisions: min/max/avg carry the
      * single representative price, median + percentile carry the
      * 5-day median.
@@ -158,19 +325,22 @@ class JanicePriceProvider implements PriceProviderInterface
     }
 
     /**
-     * Persist a Janice pricer response into MarketPrice + PriceHistory.
+     * Persist a Janice PricerItem into MarketPrice + PriceHistory.
      *
      * Janice's shape:
      *   {
-     *     "immediatePrices": { "buyPrice": ..., "sellPrice": ... },
+     *     "itemType": { "eid": 34, ... },
+     *     "immediatePrices": { "buyPrice": ..., "sellPrice": ..., "splitPrice": ... },
      *     "top5AveragePrices": { ... },
-     *     "effectivePrices": { "buyPrice5DayMedian": ..., "splitPrice": ... },
      *     ...
      *   }
      *
      * MC's MarketPrice table expects min/max/avg/median/percentile per side.
      * Janice gives us a single representative price per side; we mirror it
      * across the columns rather than synthesising a fake distribution.
+     *
+     * A side with no price is not written, so it keeps the price and the
+     * timestamp of the last fetch that had one, and stays visibly stale.
      */
     protected function storeJaniceRow(int $typeId, string $market, array $data): void
     {
@@ -189,7 +359,7 @@ class JanicePriceProvider implements PriceProviderInterface
             $this->saveSide($typeId, $market, 'sell', $sellPrice, $top5Sell);
         }
 
-        $this->updateHistory($typeId, $market, $buyPrice, $sellPrice);
+        PriceHistory::recordDay($typeId, $market, $buyPrice, $buyPrice, $sellPrice, $sellPrice);
     }
 
     /**
@@ -221,25 +391,82 @@ class JanicePriceProvider implements PriceProviderInterface
         );
     }
 
-    protected function updateHistory(int $typeId, string $market, float $buyPrice, float $sellPrice): void
+    /**
+     * Keep Janice's last answer for the Watchdog and Diagnostics. A refusal,
+     * or a fetch in which every request failed, marks it failing; a price
+     * clears that. An answer with no prices in it changes nothing, since that
+     * is normal for types nobody trades.
+     */
+    protected function recordOutcome(int $answered, ?JaniceRefusedException $refusal): void
     {
-        if ($buyPrice <= 0 && $sellPrice <= 0) {
+        if ($refusal === null && $answered === 0 && $this->requestErrors === 0) {
             return;
         }
-        PriceHistory::updateOrCreate(
-            [
-                'type_id' => $typeId,
-                'market' => $market,
-                'date' => now()->toDateString(),
-            ],
-            [
-                'avg_buy' => $buyPrice,
-                'avg_sell' => $sellPrice,
-                'max_buy' => $buyPrice,
-                'min_sell' => $sellPrice,
-                'total_volume' => 0,
-            ]
-        );
+
+        try {
+            $previous = Setting::get(self::STATUS_KEY);
+            $previous = is_array($previous) ? $previous : [];
+            $wasFailing = ($previous['state'] ?? 'ok') !== 'ok';
+            $now = now()->toIso8601String();
+
+            if ($refusal === null && $answered > 0) {
+                $status = [
+                    'state' => 'ok',
+                    'error' => null,
+                    'since' => null,
+                    'last_success' => $now,
+                ];
+            } else {
+                $status = [
+                    'state' => $refusal !== null ? 'refused' : 'failing',
+                    'error' => $refusal !== null ? $refusal->getMessage() : $this->lastError,
+                    'since' => $wasFailing ? ($previous['since'] ?? $now) : $now,
+                    'last_success' => $previous['last_success'] ?? null,
+                ];
+            }
+            $status['checked_at'] = $now;
+
+            Setting::set(self::STATUS_KEY, $status, 'pricing');
+        } catch (\Throwable $e) {
+            // A status note must never break a price fetch.
+            Log::warning('[Manager Core] Janice: could not record the provider status: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Janice's last recorded answer when it was a refusal or a failure, null
+     * while it is answering or before it has been asked.
+     *
+     * @return array{state: string, error: ?string, since: ?string, last_success: ?string, checked_at: ?string}|null
+     */
+    public static function lastFailure(): ?array
+    {
+        try {
+            $status = Setting::get(self::STATUS_KEY);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        if (!is_array($status) || ($status['state'] ?? 'ok') === 'ok') {
+            return null;
+        }
+
+        return $status + ['error' => null, 'since' => null, 'last_success' => null, 'checked_at' => null];
+    }
+
+    protected function outOfTime(): bool
+    {
+        return $this->clock() >= $this->deadline;
+    }
+
+    protected function clock(): float
+    {
+        return microtime(true);
+    }
+
+    protected function pause(int $microseconds): void
+    {
+        usleep($microseconds);
     }
 
     public function getName(): string

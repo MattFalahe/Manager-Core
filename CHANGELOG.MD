@@ -20,6 +20,14 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 - **Plugins outside the suite now show up.** A plugin that registers itself with `registerSelf()`, like SeAT Timerboard, gets its own Compatible Plugins table under the Plugin Registry: state, version badge, integrations, last activity and last seen, with the same expandable details. The ecosystem map and the Plugin Registry still list the suite only. Until now `registerSelf()` saved the plugin's registry row, but the page never showed it.
 - **Diagnostics lists them too,** under Compatible plugins on the Plugin Connections tab, and Test All Plugins covers them.
 
+### 💰 Janice pricing
+
+- **Janice is asked for 100 prices per request.** Manager Core asked Janice for one price per request, so a refresh of a few hundred types was a few hundred requests, and Janice's owner blocks keys for excessive traffic. The type ids now go to Janice's pricer 100 at a time, two seconds apart, and come back with the same prices.
+- **A failed request is retried in smaller pieces, a refused key is not.** A server error, a timeout or a rejected request is retried in halves, up to three levels. A 401, 403 or 429 is about the key, so the fetch stops there instead of asking again. A fetch also stops asking after two minutes, so a slow Janice can't hold up a refresh or an appraisal.
+- **A market priced by Janice takes its Janice market from the slug field** (`jita` or `amarr`), as the Markets form asks, so a market you add can have any key. A market keyed `jita` or `amarr` works as before without one.
+- **A missing price never replaces a cached one.** Anything Janice has no price for, or that a failed request left out, keeps its cached price and its old timestamp. Janice's daily price history records only the side that has a price, so a side with no orders no longer writes a zero over the day's figure.
+- **A refused key is reported.** Janice's last answer is kept for the whole install, since one key serves every market and every plugin override. The Watchdog's `provider_unavailable` check names a refused or failing Janice, and now also covers providers used only as a plugin's provider override. Diagnostics, Master Test says the same under Per-market provider config. Saving a new key clears it, and the next fetch shows whether Janice takes the new one.
+
 ### 🐛 Fixes
 
 - **Active Plugins count on Diagnostics.** It showed every active registry row over the size of the suite list, so a self-registered plugin pushed it past the total (8 / 7). Both numbers now cover the same plugins.
