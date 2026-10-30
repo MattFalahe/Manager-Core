@@ -210,30 +210,19 @@ class FuzzworkPriceProvider implements PriceProviderInterface
     /**
      * Update the daily PriceHistory row so trend graphs include
      * Fuzzwork-driven points too. avg_buy / avg_sell mirror MC's existing
-     * convention (avg of all orders in bucket).
+     * convention (avg of all orders in bucket). Fuzzwork answers a type with
+     * no orders with zeroed buckets, which recordDay() leaves out.
      */
     protected function updateHistory(int $typeId, string $market, ?array $buyBucket, ?array $sellBucket): void
     {
-        $date = now()->toDateString();
-        $avgBuy = $buyBucket ? (float) ($buyBucket['avg'] ?? 0) : 0;
-        $avgSell = $sellBucket ? (float) ($sellBucket['avg'] ?? 0) : 0;
-        $maxBuy = $buyBucket ? (float) ($buyBucket['max'] ?? 0) : 0;
-        $minSell = $sellBucket ? (float) ($sellBucket['min'] ?? 0) : 0;
-        $vol = (int) (($buyBucket['volume'] ?? 0) + ($sellBucket['volume'] ?? 0));
-
-        PriceHistory::updateOrCreate(
-            [
-                'type_id' => $typeId,
-                'market' => $market,
-                'date' => $date,
-            ],
-            [
-                'avg_buy' => $avgBuy,
-                'avg_sell' => $avgSell,
-                'max_buy' => $maxBuy,
-                'min_sell' => $minSell,
-                'total_volume' => $vol,
-            ]
+        PriceHistory::recordDay(
+            $typeId,
+            $market,
+            $buyBucket ? (float) ($buyBucket['avg'] ?? 0) : 0.0,
+            $buyBucket ? (float) ($buyBucket['max'] ?? 0) : 0.0,
+            $sellBucket ? (float) ($sellBucket['avg'] ?? 0) : 0.0,
+            $sellBucket ? (float) ($sellBucket['min'] ?? 0) : 0.0,
+            (int) (($buyBucket['volume'] ?? 0) + ($sellBucket['volume'] ?? 0))
         );
     }
 

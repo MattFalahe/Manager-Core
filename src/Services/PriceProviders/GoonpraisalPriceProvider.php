@@ -350,26 +350,14 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
 
     protected function updateHistory(int $typeId, string $market, ?array $buy, ?array $sell): void
     {
-        $date = now()->toDateString();
-        $avgBuy  = $buy  ? (float) ($buy['avg']  ?? 0) : 0;
-        $avgSell = $sell ? (float) ($sell['avg'] ?? 0) : 0;
-        $maxBuy  = $buy  ? (float) ($buy['max']  ?? 0) : 0;
-        $minSell = $sell ? (float) ($sell['min'] ?? 0) : 0;
-        $vol     = (int)  (($buy['volume'] ?? 0) + ($sell['volume'] ?? 0));
-
-        PriceHistory::updateOrCreate(
-            [
-                'type_id' => $typeId,
-                'market'  => $market,
-                'date'    => $date,
-            ],
-            [
-                'avg_buy'      => $avgBuy,
-                'avg_sell'     => $avgSell,
-                'max_buy'      => $maxBuy,
-                'min_sell'     => $minSell,
-                'total_volume' => $vol,
-            ]
+        PriceHistory::recordDay(
+            $typeId,
+            $market,
+            $buy  ? (float) ($buy['avg']  ?? 0) : 0.0,
+            $buy  ? (float) ($buy['max']  ?? 0) : 0.0,
+            $sell ? (float) ($sell['avg'] ?? 0) : 0.0,
+            $sell ? (float) ($sell['min'] ?? 0) : 0.0,
+            (int) (($buy['volume'] ?? 0) + ($sell['volume'] ?? 0))
         );
     }
 

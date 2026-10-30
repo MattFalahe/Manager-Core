@@ -830,6 +830,10 @@ class MarketDataService
     /**
      * Update daily price history
      *
+     * A side with no orders keeps the figure the day's row already has,
+     * which matters most for structure markets, where many items only
+     * ever have sell orders.
+     *
      * @param int $typeId
      * @param string $market
      * @param array $buyOrders
@@ -838,8 +842,6 @@ class MarketDataService
      */
     protected function updatePriceHistory($typeId, $market, array $buyOrders, array $sellOrders)
     {
-        $date = now()->toDateString();
-
         $avgBuy = !empty($buyOrders) ? array_sum(array_column($buyOrders, 'price')) / count($buyOrders) : 0;
         $avgSell = !empty($sellOrders) ? array_sum(array_column($sellOrders, 'price')) / count($sellOrders) : 0;
         $maxBuy = !empty($buyOrders) ? max(array_column($buyOrders, 'price')) : 0;
@@ -847,19 +849,6 @@ class MarketDataService
 
         $totalVolume = array_sum(array_column(array_merge($buyOrders, $sellOrders), 'volume_remain'));
 
-        PriceHistory::updateOrCreate(
-            [
-                'type_id' => $typeId,
-                'market' => $market,
-                'date' => $date,
-            ],
-            [
-                'avg_buy' => $avgBuy,
-                'avg_sell' => $avgSell,
-                'max_buy' => $maxBuy,
-                'min_sell' => $minSell,
-                'total_volume' => $totalVolume,
-            ]
-        );
+        PriceHistory::recordDay((int) $typeId, (string) $market, (float) $avgBuy, (float) $maxBuy, (float) $avgSell, (float) $minSell, (int) $totalVolume);
     }
 }

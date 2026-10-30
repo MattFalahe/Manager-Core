@@ -204,8 +204,9 @@ class SeatPriceProvider implements PriceProviderInterface
     /**
      * Update daily price history from SeAT provider data
      *
-     * SeAT providers return a single price, so we store it as both buy/sell
-     * depending on the provider configuration.
+     * SeAT providers return a single price, stored on the buy or the sell
+     * side depending on the provider configuration. The other side is left
+     * as the day's row has it rather than zeroed.
      *
      * @param Collection $items
      * @param string $market
@@ -213,30 +214,18 @@ class SeatPriceProvider implements PriceProviderInterface
      */
     protected function updatePriceHistory(Collection $items, string $market)
     {
-        $date = now()->toDateString();
         $isBuy = config('prices-core.providers.' . config('prices-core.default') . '.is_buy', false);
 
         foreach ($items as $item) {
-            $price = $item->getPrice();
-            $typeId = $item->getTypeID();
+            $price = (float) $item->getPrice();
 
-            if ($price === null || $price <= 0) {
-                continue;
-            }
-
-            PriceHistory::updateOrCreate(
-                [
-                    'type_id' => $typeId,
-                    'market' => $market,
-                    'date' => $date,
-                ],
-                [
-                    'avg_buy' => $isBuy ? $price : 0,
-                    'avg_sell' => $isBuy ? 0 : $price,
-                    'max_buy' => $isBuy ? $price : 0,
-                    'min_sell' => $isBuy ? 0 : $price,
-                    'total_volume' => 0,
-                ]
+            PriceHistory::recordDay(
+                (int) $item->getTypeID(),
+                $market,
+                $isBuy ? $price : 0.0,
+                $isBuy ? $price : 0.0,
+                $isBuy ? 0.0 : $price,
+                $isBuy ? 0.0 : $price
             );
         }
     }
