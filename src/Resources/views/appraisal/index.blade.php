@@ -117,7 +117,7 @@
                                         @endforeach
                                     </optgroup>
                                     @if($citadelMarkets->isNotEmpty())
-                                        <optgroup label="Citadel markets (third-party providers)">
+                                        <optgroup label="Citadel markets">
                                             @foreach($citadelMarkets as $key => $market)
                                                 @php $sfx = ($market['is_enabled_for_polling'] ?? true) ? '' : ' (disabled)'; @endphp
                                                 <option value="{{ $key }}">
@@ -286,14 +286,22 @@ $(document).ready(function() {
         const supports = provider.supports || 'hubs';
         const marketType = compat.marketTypes[marketKey] || 'hub';
 
+        if (marketType === 'structure') {
+            // Read straight from the structure by its ID; no third-party
+            // service knows a structure that way.
+            return supports === 'hubs_regions_structures' ? 'native' : 'incompatible';
+        }
         if (marketType === 'citadel') {
-            // Only Goonpraisal can serve citadels post-pivot.
+            // The pre-seeded citadels are tracked by Goonpraisal's own slugs.
             return supports === 'hubs_and_citadels' ? 'native' : 'incompatible';
         }
         if (marketType === 'region') {
             // Custom regional market — third-party aggregators don't cover
-            // arbitrary regions, only the canonical 5 hubs.
-            return supports === 'hubs_and_citadels' ? 'native' : 'jita_fallback';
+            // arbitrary regions, only the canonical 5 hubs. ESI reads any
+            // region's order book.
+            return (supports === 'hubs_and_citadels' || supports === 'hubs_regions_structures')
+                ? 'native'
+                : 'jita_fallback';
         }
         // Hub market.
         if (supports === 'jita_amarr') {
@@ -339,7 +347,7 @@ $(document).ready(function() {
             // 'incompatible' — should be unreachable when market filter is
             // applied correctly, but defensive in case the operator beats
             // the filter or markup gets out of sync.
-            applyBadgeState('bad', prefix + " can't serve this market at all. Pick Goonpraisal for citadels.", false);
+            applyBadgeState('bad', prefix + " can't serve this market at all. Use the market's configured provider.", false);
         }
     }
 

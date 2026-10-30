@@ -2,10 +2,22 @@
 
 namespace ManagerCore\Services\ESI;
 
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use ManagerCore\Models\ESI\EsiKeyHolder;
+use ManagerCore\Models\Market;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
+use ManagerCore\Models\TypeSubscription;
+use Seat\Eseye\Exceptions\EsiScopeAccessDeniedException;
+use Seat\Eseye\Exceptions\InvalidAuthenticationException;
+use Seat\Eseye\Exceptions\InvalidContainerDataException;
+use Seat\Eseye\Exceptions\RequestFailedException;
+use Seat\Eveapi\Models\RefreshToken;
+use Seat\Services\Contracts\EsiClient;
 
 /**
  * MarketDataService - Fetches market data from ESI
@@ -25,6 +37,30 @@ class MarketDataService
     protected $timeout;
 
     /**
+     * Scope a character's token needs to read a structure's market.
+     */
+    public const STRUCTURE_MARKET_SCOPE = 'esi-markets.structure_markets.v1';
+
+    /**
+     * How long one read of a structure market answers later requests.
+     * ESI caches the endpoint for five minutes, so a read inside that
+     * window costs nothing anyway. This decides how stale a price may get
+     * before an on-demand request (an appraisal, a new subscription) reads
+     * the structure again.
+     */
+    protected const STRUCTURE_FRESH_SECONDS = 900;
+
+    /**
+     * Key Pool characters tried per read before giving up.
+     */
+    protected const STRUCTURE_MAX_READERS = 5;
+
+    /**
+     * Safety cap only; X-Pages ends a read. 500 pages is 500,000 orders.
+     */
+    protected const STRUCTURE_MAX_PAGES = 500;
+
+    /**
      * Constructor
      */
     public function __construct()
@@ -39,8 +75,9 @@ class MarketDataService
      * Dispatches to the right fetcher based on the market's type. Hub
      * markets (Jita, Amarr, etc.) use the public ESI region-orders
      * endpoint. Citadel markets (player-owned structures with a market
-     * module) use the authenticated structure-orders endpoint with a
-     * Bearer token from the market's configured auth character.
+     * module) read the structure's own order book through the
+     * authenticated structure-markets endpoint, as a director from the
+     * ESI Key Pool. See updateStructureMarketPrices().
      *
      * Operators choose which markets are citadel vs hub via the Markets
      * admin page. The market_type column on manager_core_markets is
@@ -59,14 +96,9 @@ class MarketDataService
             return;
         }
 
-        // Hub markets only path. Citadel markets are now served by third-
-        // party providers (Goonpraisal/Janice) since CCP's structure-orders
-        // ESI endpoint has unfixable pagination problems on large hubs.
-        // If a citadel market reaches this method, log and bail — the
-        // operator should configure a provider via the Markets admin UI.
         $marketType = $marketConfig['market_type'] ?? \ManagerCore\Models\Market::TYPE_HUB;
         if ($marketType === \ManagerCore\Models\Market::TYPE_CITADEL) {
-            Log::info("[Manager Core] Market '{$market}' is a citadel — ESI direct fetch removed; configure a third-party provider (Goonpraisal/Janice) for this market.");
+            $this->updateStructureMarketPrices($typeIds, $market, $marketConfig);
             return;
         }
 
@@ -283,6 +315,350 @@ class MarketDataService
         return array_values(array_filter($typeIds,
             fn($id) => !isset($freshSet[(int) $id])
         ));
+    }
+
+    /**
+     * Price a citadel market from the structure's own order book.
+     *
+     * ESI's /markets/structures/{structure_id}/ has no type filter: every
+     * page is up to 1,000 orders of any type. One read of all pages
+     * therefore prices every type at once, and its cost depends only on
+     * the size of the market (one request per 1,000 orders), not on how
+     * many types or plugins ask. So each read covers the requested types
+     * plus everything plugins subscribe to on this market, and answers
+     * later requests for STRUCTURE_FRESH_SECONDS.
+     *
+     * The structure ID lives in the market's provider_slug, the field that
+     * holds each provider's own identifier for a market.
+     */
+    protected function updateStructureMarketPrices(array $typeIds, string $market, array $marketConfig): void
+    {
+        $row = Market::where('key', $market)->first();
+
+        // Only a market routed through ESI owns its refresh status here. A
+        // Goonpraisal market read through a plugin's ESI override must not
+        // be marked failed for having no structure ID.
+        $ownsRow = $row && $row->provider === 'esi';
+
+        $structureId = Market::structureIdFromSlug($marketConfig['provider_slug'] ?? null);
+        if (!$structureId) {
+            Log::warning("[Manager Core] Market '{$market}' has no structure ID in its slug, so ESI can't read it.");
+            if ($ownsRow) {
+                $row->recordRefresh(Market::STATUS_ERROR,
+                    "No structure ID. Put the structure's ID in the market's slug field to read it through ESI.");
+            }
+            return;
+        }
+
+        $requested = array_values(array_unique(array_map('intval', $typeIds)));
+        if ($this->structureReadCovers($market, $requested)) {
+            Log::info("[Manager Core] Structure market '{$market}': the last read is recent and covers all " . count($requested) . " requested type(s).");
+            return;
+        }
+
+        try {
+            Cache::lock('mc.structure_market.' . $market . '.read', 900)->block(120, function () use ($market, $structureId, $requested, $row, $ownsRow) {
+                // Another worker may have finished a read while this one waited.
+                if ($this->structureReadCovers($market, $requested)) {
+                    return;
+                }
+
+                $this->readStructureMarket($market, $structureId, $requested, $ownsRow ? $row : null);
+            });
+        } catch (LockTimeoutException $e) {
+            Log::warning("[Manager Core] Structure market '{$market}': another read was still running after 120s; cached prices stay as they are.");
+        }
+    }
+
+    /**
+     * One full read of a structure market, tried with each candidate
+     * character until one can open it. A failed read leaves the cached
+     * prices alone.
+     */
+    protected function readStructureMarket(string $market, int $structureId, array $requested, ?Market $row): void
+    {
+        $wanted = array_values(array_unique(array_merge($requested, $this->subscribedTypeIds($market))));
+        $wantedSet = array_flip($wanted);
+
+        $readers = $this->structureReaders($market);
+        if (empty($readers)) {
+            Log::warning("[Manager Core] Structure market '{$market}': no ESI Key Pool character has the " . self::STRUCTURE_MARKET_SCOPE . " scope.");
+            $row?->recordRefresh(Market::STATUS_ERROR,
+                'No character to read this structure with. Add a director who can dock there to the ESI Key Pool; their token needs the ' . self::STRUCTURE_MARKET_SCOPE . ' scope.');
+            return;
+        }
+
+        $failures = [];
+        $status = Market::STATUS_ERROR;
+
+        foreach ($readers as $token) {
+            $name = $this->characterLabel((int) $token->character_id);
+
+            try {
+                $read = $this->fetchStructureOrders($token, $structureId, $wantedSet);
+            } catch (\Throwable $e) {
+                [$status, $reason, $tryNext] = $this->classifyStructureFailure($e);
+                $failures[] = "{$name}: {$reason}";
+                Log::info("[Manager Core] Structure market '{$market}': {$name} couldn't read it ({$reason}).");
+
+                if ($tryNext) {
+                    continue;
+                }
+                break;
+            }
+
+            foreach ($read['byType'] as $typeId => $orders) {
+                $this->calculateAndSavePrices($typeId, array_values($orders), $market);
+            }
+
+            Cache::forever($this->structureReaderKey($market), (int) $token->character_id);
+            Cache::put($this->structureReadKey($market), [
+                'at' => now()->getTimestamp(),
+                'types' => $wanted,
+                'priced' => count($read['byType']),
+                'pages' => $read['pages'],
+                'orders' => $read['orders'],
+                'character' => $name,
+            ], now()->addDays(7));
+
+            $row?->recordRefresh(Market::STATUS_OK);
+            Log::info("[Manager Core] Structure market '{$market}': read {$read['pages']} page(s), {$read['orders']} order(s) as {$name}; priced " . count($read['byType']) . " of " . count($wanted) . " type(s).");
+            return;
+        }
+
+        $row?->recordRefresh($status, implode(' | ', $failures));
+        Log::warning("[Manager Core] Structure market '{$market}' could not be read; cached prices stay as they are. " . implode(' | ', $failures));
+    }
+
+    /**
+     * Read every page of a structure's market with one character's token.
+     *
+     * The page goes in the query string through page(), before each call.
+     * invoke() only takes path values, and Eseye clears the query string
+     * after every request, so a page handed to invoke() as an extra
+     * argument is dropped and every request comes back as page 1.
+     *
+     * Throws on the first failed page: a read is all pages or nothing.
+     *
+     * @return array{byType: array<int, array<int, array>>, pages: int, orders: int}
+     */
+    protected function fetchStructureOrders(RefreshToken $token, int $structureId, array $wantedSet): array
+    {
+        $esi = app()->make(EsiClient::class);
+        $esi->setAuthentication($token);
+
+        $byType = [];
+        $orders = 0;
+        $pages = 1;
+        $page = 1;
+
+        try {
+            do {
+                $response = $esi->page($page)->invoke('get', '/markets/structures/{structure_id}/', [
+                    'structure_id' => $structureId,
+                ]);
+
+                if ($page === 1) {
+                    $reported = (int) ($response->getPagesCount() ?? 1);
+                    $pages = max(1, min($reported, self::STRUCTURE_MAX_PAGES));
+
+                    if ($reported > self::STRUCTURE_MAX_PAGES) {
+                        Log::warning("[Manager Core] Structure {$structureId} reports {$reported} pages; reading the first " . self::STRUCTURE_MAX_PAGES . '.');
+                    }
+                }
+
+                $body = $response->getBody();
+                foreach (is_array($body) ? $body : [] as $order) {
+                    $orders++;
+                    $typeId = (int) ($order->type_id ?? 0);
+                    if (!isset($wantedSet[$typeId])) {
+                        continue;
+                    }
+
+                    // Keyed by order ID: if ESI's cache turns over during a
+                    // read, an order can turn up on two pages.
+                    $byType[$typeId][(int) $order->order_id] = [
+                        'is_buy_order' => (bool) $order->is_buy_order,
+                        'price' => (float) $order->price,
+                        'volume_remain' => (int) $order->volume_remain,
+                    ];
+                }
+
+                unset($response, $body);
+                $page++;
+            } while ($page <= $pages);
+        } finally {
+            $this->saveRefreshedToken($esi, $token);
+        }
+
+        return ['byType' => $byType, 'pages' => $pages, 'orders' => $orders];
+    }
+
+    /**
+     * Characters to read a structure market with: ESI Key Pool members
+     * whose SeAT token has the structure-markets scope, the one that last
+     * read this market first. The pool holds the directors the operator
+     * already lets Manager Core call ESI as, and a director can normally
+     * dock at their own corporation's structures.
+     *
+     * @return RefreshToken[]
+     */
+    protected function structureReaders(string $market): array
+    {
+        $ids = EsiKeyHolder::where('enabled', true)
+            ->orderBy('id')
+            ->pluck('character_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $last = (int) Cache::get($this->structureReaderKey($market), 0);
+        if ($last && in_array($last, $ids, true)) {
+            $ids = array_merge([$last], array_values(array_diff($ids, [$last])));
+        }
+
+        $readers = [];
+        foreach ($ids as $id) {
+            $token = RefreshToken::find($id);
+            if (!$token) {
+                continue;
+            }
+
+            $scopes = $token->scopes ?? [];
+            if (is_string($scopes)) {
+                $scopes = json_decode($scopes, true) ?? [];
+            }
+            if (!in_array(self::STRUCTURE_MARKET_SCOPE, (array) $scopes, true)) {
+                continue;
+            }
+
+            $readers[] = $token;
+            if (count($readers) >= self::STRUCTURE_MAX_READERS) {
+                break;
+            }
+        }
+
+        return $readers;
+    }
+
+    /**
+     * Turn a failed read into [market status, reason, try the next character].
+     *
+     * Token and access problems belong to the character, so another one may
+     * get in. A missing structure, rate limiting or an ESI outage would fail
+     * the same way for everyone, so the read stops there.
+     */
+    protected function classifyStructureFailure(\Throwable $e): array
+    {
+        $code = $e instanceof RequestFailedException ? (int) $e->getCode() : 0;
+        $detail = trim($e->getMessage());
+
+        if ($e instanceof EsiScopeAccessDeniedException) {
+            return [Market::STATUS_ERROR, 'token lacks the ' . self::STRUCTURE_MARKET_SCOPE . ' scope', true];
+        }
+        if ($e instanceof InvalidAuthenticationException || $e instanceof InvalidContainerDataException
+            || $code === 401 || ($code === 400 && stripos($detail, 'invalid') !== false)) {
+            return [Market::STATUS_ERROR, 'token rejected' . ($detail !== '' ? ": {$detail}" : ''), true];
+        }
+        if ($code === 403) {
+            return [Market::STATUS_ERROR, "no access to this structure's market (403)", true];
+        }
+        if ($code === 404) {
+            return [Market::STATUS_ERROR, 'structure not found (404): destroyed, unanchored, or a wrong ID', false];
+        }
+        if ($code === 420 || $code === 429) {
+            return [Market::STATUS_RATE_LIMITED, "ESI rate limited the read ({$code})", false];
+        }
+        if ($code >= 500) {
+            return [Market::STATUS_PROVIDER_DOWN, "ESI error {$code}" . ($detail !== '' ? ": {$detail}" : ''), false];
+        }
+
+        return [Market::STATUS_ERROR, $detail !== '' ? $detail : get_class($e), false];
+    }
+
+    /**
+     * Eseye refreshes an expired access token in memory only. Write it back
+     * to SeAT, as the ESI Key Pool poll does, so the next call doesn't have
+     * to refresh it again.
+     */
+    protected function saveRefreshedToken(EsiClient $esi, RefreshToken $token): void
+    {
+        try {
+            $auth = $esi->getAuthentication();
+            $token->token = $auth->getAccessToken();
+            $token->refresh_token = $auth->getRefreshToken();
+            $token->expires_on = $auth->getExpiresOn();
+            $token->save();
+        } catch (\Throwable $e) {
+            Log::debug("[Manager Core] Could not save the refreshed token for character {$token->character_id}: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Whether the last read of this market is recent enough and covered
+     * every requested type, priced or found with no orders.
+     */
+    protected function structureReadCovers(string $market, array $typeIds): bool
+    {
+        $read = Cache::get($this->structureReadKey($market));
+        if (!is_array($read) || ($read['at'] ?? 0) < now()->subSeconds(self::STRUCTURE_FRESH_SECONDS)->getTimestamp()) {
+            return false;
+        }
+
+        return empty(array_diff($typeIds, $read['types'] ?? []));
+    }
+
+    /**
+     * The last successful read of a structure market (at, pages, orders,
+     * priced, character), or null before the first one. Shown by the
+     * Markets page's Test button.
+     */
+    public function lastStructureRead(string $market): ?array
+    {
+        $read = Cache::get($this->structureReadKey($market));
+
+        return is_array($read) ? $read : null;
+    }
+
+    /**
+     * Make the next request for this market read the structure again.
+     */
+    public function forgetStructureRead(string $market): void
+    {
+        Cache::forget($this->structureReadKey($market));
+    }
+
+    protected function subscribedTypeIds(string $market): array
+    {
+        try {
+            return TypeSubscription::where('market', $market)
+                ->distinct()
+                ->pluck('type_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    protected function characterLabel(int $characterId): string
+    {
+        try {
+            $name = DB::table('character_infos')->where('character_id', $characterId)->value('name');
+        } catch (\Throwable $e) {
+            $name = null;
+        }
+
+        return $name ? "{$name} ({$characterId})" : "character {$characterId}";
+    }
+
+    protected function structureReadKey(string $market): string
+    {
+        return 'mc.structure_market.' . $market . '.last_read';
+    }
+
+    protected function structureReaderKey(string $market): string
+    {
+        return 'mc.structure_market.' . $market . '.reader';
     }
 
     /**

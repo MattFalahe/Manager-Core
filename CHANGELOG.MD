@@ -6,6 +6,15 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### 🏰 Citadel markets read straight from the structure
+
+- **Any structure a director in your ESI Key Pool can dock at can be priced now.** Add a market on the Markets page, keep *Citadel* and *MCPraisal (ESI)*, and put the structure ID in the slug field. The name, system and region are filled in from SeAT. The director's token needs the `esi-markets.structure_markets.v1` scope.
+- **One read prices everything.** ESI can't filter a structure's market by item, so Manager Core reads the whole market once, one request per 1,000 orders (a 52,000-order Keepstar is 53 requests), and prices every item plugins subscribe to there from that read. A read is reused for 15 minutes, a failed read keeps the cached prices, and the director who last got in is tried first.
+- **Test** on the row does a fresh read and reports the pages, the orders and the director it read them as.
+- **Adding custom markets is back** on the Markets page, with Edit and Delete for the markets you add. The seven Goonpraisal markets stay as they are.
+- **The Appraisal page** counts MCPraisal as serving these structure markets and custom regional markets, instead of warning about a Jita fallback.
+- **The 1.0.0 docs were wrong about ESI.** They said the structure market endpoint returns page 1 for every page on big hubs. It doesn't: the code before 1.0.0 passed the page number in a way the ESI client ignores. The Markets page, the form and Help now describe both ways to price a citadel market.
+
 ### 🎉 Compatible Plugins on the Plugin Bridge page
 
 - **Plugins outside the suite now show up.** A plugin that registers itself with `registerSelf()`, like SeAT Timerboard, gets its own Compatible Plugins table under the Plugin Registry: state, version badge, integrations, last activity and last seen, with the same expandable details. The ecosystem map and the Plugin Registry still list the suite only. Until now `registerSelf()` saved the plugin's registry row, but the page never showed it.

@@ -72,8 +72,9 @@ class AppraisalController extends Controller
 
         // Compatibility data for the live "this provider supports this market"
         // badge AND the citadel-only-with-goonpraisal market filter:
-        //   - $marketTypes: { key => 'hub' | 'citadel' | 'region' }
-        //   - providers[X][supports]: 'hubs' | 'hubs_and_citadels' | 'jita_amarr'
+        //   - $marketTypes: { key => 'hub' | 'citadel' | 'structure' | 'region' }
+        //   - providers[X][supports]: 'hubs' | 'hubs_and_citadels' |
+        //     'hubs_regions_structures' | 'jita_amarr'
         // The blade serialises these into JS — provider-change re-renders
         // the market dropdown showing only compatible markets, and
         // market-change snaps provider to a compatible one if the current
@@ -100,19 +101,15 @@ class AppraisalController extends Controller
      * Jita-fallback trap):
      *   - 'hubs_and_citadels' : tracks the 5 hub regions AND the 7
      *                            pre-seeded Goonpraisal nullsec citadels
-     *                            (only Goonpraisal qualifies post the
-     *                            2026-05-27 third-party provider pivot)
+     *                            (Goonpraisal)
+     *   - 'hubs_regions_structures' : MCPraisal/ESI. Any region's public
+     *                            order book, and citadel markets read
+     *                            straight from the structure by ID
      *   - 'hubs'              : tracks only the five main trade hubs
-     *                            (Jita/Amarr/Dodixie/Hek/Rens) — Fuzzwork,
-     *                            MCPraisal/ESI, and SeAT-chained sub-providers
+     *                            (Jita/Amarr/Dodixie/Hek/Rens) — Fuzzwork
+     *                            and SeAT-chained sub-providers
      *   - 'jita_amarr'        : Janice — currently only Jita + Amarr;
      *                            other hubs silently fall back to Jita
-     *
-     * Note: MCPraisal/ESI was historically marked 'all' because we used to
-     * scrape /markets/structures/{id}/orders/ directly. The 2026-05-27 pivot
-     * removed that path (CCP's pagination bug — pages 2..N return identical
-     * content), so MCPraisal now only covers hubs via the working
-     * /markets/{region_id}/orders/ endpoint.
      *
      * Availability mirrors each provider's own isAvailable() contract:
      * Janice needs an API key, SeAT needs prices-core installed,
@@ -124,8 +121,8 @@ class AppraisalController extends Controller
             'esi' => [
                 'label' => 'MCPraisal (Manager Core ESI)',
                 'available' => true,
-                'supports' => 'hubs',
-                'note' => 'Hub markets only; fresh CCP data via the ESI region endpoint',
+                'supports' => 'hubs_regions_structures',
+                'note' => 'Fresh CCP data: hub and regional markets via the ESI region endpoint, citadel markets read straight from the structure',
             ],
             'fuzzwork' => [
                 'label' => 'Fuzzwork',
@@ -143,7 +140,7 @@ class AppraisalController extends Controller
                 'label' => 'Goonpraisal',
                 'available' => true,
                 'supports' => 'hubs_and_citadels',
-                'note' => 'Covers Imperium nullsec hubs (C-J6MT, GB-6X5, etc.) plus Jita/Amarr/Dodixie. The only provider that can serve citadel markets in v1.0.0.',
+                'note' => 'Covers Imperium nullsec hubs (C-J6MT, GB-6X5, etc.) plus Jita/Amarr/Dodixie. Serves the seven pre-seeded citadel markets.',
             ],
             'seat' => [
                 'label' => 'SeAT Price Provider',
@@ -169,12 +166,15 @@ class AppraisalController extends Controller
      * Map each market key to a type so the JS compatibility check knows
      * what the provider has to support:
      *
-     *   - 'hub'     — the five canonical trade hubs the third-party
-     *                  providers track (Jita/Amarr/Dodixie/Hek/Rens)
-     *   - 'citadel' — operator-added player citadel (MCPraisal-only)
-     *   - 'region'  — operator-added regional market not in the hub list
-     *                  (MCPraisal-only because no third-party provider
-     *                  has region-scoped order books for custom regions)
+     *   - 'hub'       — the five canonical trade hubs the third-party
+     *                    providers track (Jita/Amarr/Dodixie/Hek/Rens)
+     *   - 'citadel'   — a citadel market a third-party service tracks by
+     *                    its own slug (the pre-seeded Goonpraisal rows)
+     *   - 'structure' — a citadel market read straight from the structure
+     *                    through ESI, by structure ID (MCPraisal-only)
+     *   - 'region'    — operator-added regional market not in the hub list
+     *                    (MCPraisal-only because no third-party provider
+     *                    has region-scoped order books for custom regions)
      *
      * Pulls from the Market::getEffectiveMarkets() result so we honour
      * the same `market_type` discriminator MarketDataService uses when
@@ -187,7 +187,9 @@ class AppraisalController extends Controller
         foreach ($markets as $key => $market) {
             $mt = $market['market_type'] ?? null;
             if ($mt === \ManagerCore\Models\Market::TYPE_CITADEL) {
-                $map[$key] = 'citadel';
+                $readFromStructure = ($market['provider'] ?? null) === 'esi'
+                    && \ManagerCore\Models\Market::structureIdFromSlug($market['provider_slug'] ?? null) !== null;
+                $map[$key] = $readFromStructure ? 'structure' : 'citadel';
             } elseif (in_array(strtolower((string) $key), $knownHubs, true)) {
                 $map[$key] = 'hub';
             } else {

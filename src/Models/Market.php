@@ -14,12 +14,10 @@ use Illuminate\Database\Eloquent\Model;
  *      No auth required, fast, type-filterable.
  *
  *   2. CITADEL markets (player-owned structures in nullsec)
- *      Use a third-party appraisal service (Goonpraisal, Janice, etc.).
- *      MC's own ESI scrape of /markets/structures/{id}/orders/ was tried
- *      in earlier versions but proved unreliable for large hubs because
- *      CCP's pagination collapses — pages 2..N return identical content
- *      to page 1. Third-party providers (Goonpraisal, Adam4EVE) have
- *      accumulated their own datasets and serve correct citadel prices.
+ *      Either read straight from the structure through ESI's
+ *      /markets/structures/{structure_id}/ (provider 'esi', needs an ESI
+ *      Key Pool director who can dock there), or priced by a third-party
+ *      service that tracks the hub (Goonpraisal, Janice).
  *
  * Provider routing:
  *
@@ -30,7 +28,8 @@ use Illuminate\Database\Eloquent\Model;
  *   - `provider_slug` is the provider-specific market identifier.
  *     For Goonpraisal: 'insmother' / 'tenerifis' / 'catch' / etc.
  *     For Janice: their market name.
- *     For ESI / Fuzzwork: typically null (region_id + system_ids do the work).
+ *     For ESI on a citadel market: the structure ID.
+ *     For ESI / Fuzzwork on a hub: null (region_id + system_ids do the work).
  *
  * Per-plugin market selection (which market Buyback / Mining / etc. prefer)
  * is handled separately by `manager_core_pricing_preferences`.
@@ -92,11 +91,38 @@ class Market extends Model
     public const STATUS_PROVIDER_DOWN = 'provider_down'; // upstream third-party unavailable
 
     /**
-     * Is this a citadel market (priced via third-party provider)?
+     * Is this a citadel market (a player-owned structure)?
      */
     public function isCitadel(): bool
     {
         return $this->market_type === self::TYPE_CITADEL;
+    }
+
+    /**
+     * Is this a citadel market read straight from the structure through ESI?
+     */
+    public function isStructureMarket(): bool
+    {
+        return $this->isCitadel()
+            && $this->provider === 'esi'
+            && static::structureIdFromSlug($this->provider_slug) !== null;
+    }
+
+    /**
+     * The structure ID held in a provider slug, or null when the slug isn't
+     * one. Upwell structure IDs start at 1,000,000,000,000, which keeps NPC
+     * station IDs (60,000,000 range) and provider names out.
+     */
+    public static function structureIdFromSlug(?string $slug): ?int
+    {
+        $slug = trim((string) $slug);
+        if (!preg_match('/^\d{13,19}$/', $slug)) {
+            return null;
+        }
+
+        $id = (int) $slug;
+
+        return $id >= 1000000000000 ? $id : null;
     }
 
     /**

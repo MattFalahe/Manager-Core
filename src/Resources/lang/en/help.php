@@ -99,8 +99,8 @@ return [
 
     // Markets + Providers (rewritten v1.0.0 — third-party provider routing)
     'custom_markets_title' => 'Markets + Pricing Providers',
-    'custom_markets_intro' => 'MC ships with <strong>12 pre-seeded markets</strong> — the 5 public trade hubs (Jita / Amarr / Dodixie / Hek / Rens, enabled by default) plus 7 Goonpraisal-tracked Imperium nullsec hubs (disabled by default, operator opt-in). The <strong>Manager Core → Markets</strong> admin page lets you enable / disable any of these, plus add your own custom regional or citadel markets if you have a hub Goonpraisal doesn\'t cover.',
-    'custom_markets_use_case' => '<p><strong>Why the third-party-provider architecture:</strong> CCP\'s <code>/markets/structures/{id}/</code> ESI endpoint has an unfixable pagination bug on large nullsec hubs — pages 2..N return identical content to page 1, capping reachable orders at ~1000 of ~52,000 regardless of which auth character you use. We verified this empirically before pivoting. Third-party services like <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a> and <a href="https://janice.e-351.com" target="_blank" rel="noopener">Janice</a> have accumulated their own datasets and serve correct prices for the major nullsec markets. MC routes citadel queries through them instead of trying to scrape CCP directly.</p>',
+    'custom_markets_intro' => 'MC ships with <strong>12 pre-seeded markets</strong>: the 5 public trade hubs (Jita / Amarr / Dodixie / Hek / Rens, enabled by default) plus 7 Goonpraisal-tracked Imperium nullsec hubs (disabled by default, operator opt-in). The <strong>Manager Core → Markets</strong> admin page lets you enable / disable any of these, and add your own: any structure a director in your ESI Key Pool can dock at, read straight from ESI, or a regional hub.',
+    'custom_markets_use_case' => '<p><strong>Two ways to price a citadel market.</strong> MC can read the structure\'s own order book through ESI\'s <code>/markets/structures/{structure_id}/</code>, as a director from the ESI Key Pool who can dock there. That works for any structure your directors can reach, with nothing outside CCP involved. Or it can ask a third-party service that tracks the hub: <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a> covers the major Imperium markets and <a href="https://janice.e-351.com" target="_blank" rel="noopener">Janice</a> covers Jita and Amarr, with no ESI token needed.</p>',
     'custom_markets_two_types' => '<table style="width:100%; border-collapse:collapse; margin-top:10px; font-size:0.9em;">
         <thead><tr style="background:#23262d; color:#dfe3eb;">
             <th style="padding:6px 10px; text-align:left;">Provider</th>
@@ -110,8 +110,8 @@ return [
         <tbody>
             <tr>
                 <td style="padding:6px 10px;"><strong>MCPraisal (ESI)</strong></td>
-                <td style="padding:6px 10px;">Public hub markets via ESI <code>/markets/{region_id}/orders/</code> — type-filterable, no pagination bugs</td>
-                <td style="padding:6px 10px;">None</td>
+                <td style="padding:6px 10px;">Public hub markets via ESI <code>/markets/{region_id}/orders/</code>, and citadel markets read straight from the structure via <code>/markets/structures/{structure_id}/</code></td>
+                <td style="padding:6px 10px;">None for hubs. For a structure, a director in the ESI Key Pool who can dock there, with the <code>esi-markets.structure_markets.v1</code> scope</td>
             </tr>
             <tr>
                 <td style="padding:6px 10px;"><strong>Goonpraisal</strong></td>
@@ -143,16 +143,15 @@ return [
         <li>Open <strong>Manager Core → Pricing Preferences</strong>. The newly-enabled citadel market now appears in the market dropdown for every consumer plugin without the "(disabled)" suffix. Pick it for whichever plugin (Mining Manager / Structure Manager / Buyback Manager) you want using your local hub pricing.</li>
     </ol>',
     'custom_markets_health_title' => 'Adding a custom market',
-    'custom_markets_health_table' => '<p>If your alliance trades somewhere outside the 7 pre-seeded Goonpraisal markets:</p>
+    'custom_markets_health_table' => '<p>To price a structure your alliance trades at, whether Goonpraisal covers it or not:</p>
     <ol>
-        <li>Open <strong>Manager Core → Markets → Add Custom Market</strong>.</li>
-        <li>Pick <em>Citadel / Player Structure</em> as the market type (or <em>Hub</em> for a regional hub Janice / Fuzzwork knows about).</li>
-        <li>Choose a <strong>Pricing Provider</strong> from the dropdown — Goonpraisal if it\'s in their catalog, Janice if it\'s a hub Janice tracks (Jita / Amarr / R1O-GN once we expand their slugs), or MCPraisal for hub markets via ESI.</li>
-        <li>Fill in the <strong>Provider Market Slug</strong> — this is the upstream service\'s identifier for the market. The hint under the field lists Goonpraisal\'s known slugs (uppercase structure codes like <code>C-J6MT</code>, <code>UALX-3</code>) and Janice\'s (<code>jita</code>, <code>amarr</code>).</li>
-        <li>Fill <strong>Region ID</strong> (always required for record-keeping; only actually used for ESI / Fuzzwork providers) and optional <strong>System ID</strong>, <strong>System Name</strong>, <strong>Structure Name</strong> display fields. Save.</li>
-        <li>Click <em>Test</em> on the row → verify the provider returns a price.</li>
-    </ol>',
-    'custom_markets_pagination_note' => '<p style="margin-top:10px;"><strong>Performance note:</strong> hub-market refreshes via the ESI region endpoint are batch-parallel (25 types concurrent), with a 30-minute TTL short-circuit so the scheduled cron skips types that already have fresh prices. Citadel-market refreshes via Goonpraisal/Janice are per-type sequential with a 0.75-second inter-batch pause (their terms of service). On most installs the full refresh cycle for all enabled markets completes in well under a minute.</p>',
+        <li>Make sure a director who can dock there is in the <strong>ESI Key Pool</strong>, and that their token has the <code>esi-markets.structure_markets.v1</code> scope.</li>
+        <li>Open <strong>Manager Core → Markets → Add Market</strong>. Keep <em>Citadel / Player Structure</em> and <em>MCPraisal (ESI)</em>.</li>
+        <li>Put the <strong>structure ID</strong> (a 13-digit number, e.g. <code>1049588174021</code>) in the <strong>Provider Market Slug</strong> field and give the market a display name. Region, system and structure name are filled in from SeAT when you leave them blank. Save.</li>
+        <li>Click <em>Test</em> on the row. A good read reports how many pages and orders it read, and which director it read them as.</li>
+    </ol>
+    <p>A market priced by Goonpraisal or Janice works the same way: pick that provider instead and put the service\'s own slug in the slug field. The hint under the field lists Goonpraisal\'s slugs (uppercase structure codes like <code>C-J6MT</code>, <code>UALX-3</code>) and Janice\'s (<code>jita</code>, <code>amarr</code>).</p>',
+    'custom_markets_pagination_note' => '<p style="margin-top:10px;"><strong>Performance note:</strong> hub-market refreshes via the ESI region endpoint are batch-parallel (25 types concurrent), with a 30-minute TTL short-circuit so the scheduled cron skips types that already have fresh prices. Citadel-market refreshes via Goonpraisal/Janice are per-type sequential with a 0.75-second inter-batch pause (their terms of service). A structure market read through ESI is read whole, since ESI can\'t filter it by item: one request per 1,000 orders (a 50,000-order Keepstar takes about 50), and that one read prices every item plugins subscribe to there. It is reused for 15 minutes. On most installs the full refresh cycle for all enabled markets completes in well under a minute.</p>',
 
     'custom_markets_consume_title' => 'Pointing a plugin at a market',
     'custom_markets_consume_intro' => '<p>Enabling a market in MC just <em>makes it pickable</em> — it doesn\'t change pricing for any consumer plugin. To make Structure Manager\'s Fuel Economics (or Mining Manager\'s appraisal, or Buyback Manager) read from your citadel instead of Jita, point that plugin at the new market via <strong>Pricing Preferences</strong>. Zero plugin code changes — purely admin configuration.</p>',
@@ -577,7 +576,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'faq_a1' => 'Market prices are updated automatically by the scheduled task <code>manager-core:update-prices</code>, which runs every 4 hours by default (cron: <code>0 */4 * * *</code>). The interval is editable from the Settings page (Pricing tab → Update Frequency) and the schedule entry is updated live when you save.',
 
     'faq_q2' => 'Q2: Can I add custom markets?',
-    'faq_a2' => 'Yes — two ways. (1) From the <strong>Settings page</strong> (Markets tab), click <em>Add Market</em>, fill in the key, name, EVE region ID, and comma-separated system IDs. The region ID and system IDs are validated against the SDE before save. (2) For static defaults, edit <code>manager-core.config.php</code> under <code>pricing.markets</code>. DB markets take precedence over config defaults.',
+    'faq_a2' => 'Yes, two ways. (1) Open <strong>Manager Core → Markets</strong> and click <em>Add Market</em>. For a player structure, keep <em>Citadel</em> and <em>MCPraisal (ESI)</em> and put the structure ID in the slug field; see <em>Markets + Pricing Providers</em> above. (2) For static hub defaults, edit <code>manager-core.config.php</code> under <code>pricing.markets</code>. DB markets take precedence over config defaults.',
 
     'faq_q3' => 'Q3: Are appraisals stored permanently?',
     'faq_a3' => 'Appraisals are stored in <code>manager_core_appraisals</code> indefinitely by default. To prune old ones, run <code>php artisan manager-core:cleanup</code> (or schedule it). Appraisal retention is intentionally manual so you do not lose audit trails by accident.',

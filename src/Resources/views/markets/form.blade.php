@@ -85,11 +85,11 @@
                                     Hub (public ESI region order book)
                                 </option>
                                 <option value="citadel" {{ old('market_type', $market->market_type) === 'citadel' ? 'selected' : '' }}>
-                                    Citadel / Player Structure (third-party provider)
+                                    Citadel / Player Structure
                                 </option>
                             </select>
                             <div class="mk-hint">
-                                Hub markets use ESI's public region endpoint. Citadel markets are priced via a third-party appraisal service since CCP's structure-orders endpoint is unreliable on large hubs.
+                                Hub markets use ESI's public region endpoint. Citadel markets are read straight from the structure through ESI (MCPraisal, as a director in the ESI Key Pool who can dock there), or priced by a third-party service that tracks the hub (Goonpraisal, Janice).
                             </div>
                         </div>
 
@@ -113,25 +113,26 @@
                             <label for="provider_slug">Provider Market Slug</label>
                             <input type="text" name="provider_slug" id="provider_slug" class="form-control"
                                    value="{{ old('provider_slug', $market->provider_slug) }}"
-                                   placeholder="e.g. insmother, jita"
+                                   placeholder="e.g. 1049588174021, C-J6MT, jita"
                                    maxlength="64">
                             <div class="mk-hint">
                                 Provider-specific market identifier.
+                                For <strong>MCPraisal (ESI) on a citadel market</strong>: the structure ID, e.g. <code>1049588174021</code>. Name, system and region are filled in from SeAT when left blank.
                                 For <strong>Goonpraisal</strong>: <code>insmother</code>, <code>tenerifis</code>, <code>catch</code>, <code>paragon-soul</code>, <code>esoteria</code>, <code>insmother-lawn</code>, <code>immensea</code>, <code>jita</code>, <code>amarr</code>, <code>dodixie</code>, <code>universe</code>.
                                 For <strong>Janice</strong>: <code>jita</code> or <code>amarr</code>.
-                                For <strong>ESI / Fuzzwork</strong>: usually leave blank — region_id + system_ids drive the lookup.
+                                For <strong>MCPraisal on a hub, or Fuzzwork</strong>: leave blank. Region and system drive the lookup.
                             </div>
                         </div>
                     </div>
 
                     <div class="col-md-6">
                         <div class="mk-form-row">
-                            <label for="region_id">Region ID *</label>
+                            <label for="region_id">Region ID</label>
                             <input type="number" name="region_id" id="region_id" class="form-control"
-                                   value="{{ old('region_id', $market->region_id) }}" required min="1">
+                                   value="{{ old('region_id', $market->region_id) }}" min="1">
                             <div class="mk-hint">
                                 EVE region ID. Examples: The Forge = <code>10000002</code>, Insmother = <code>10000009</code>, Domain = <code>10000043</code>.
-                                Used for ESI/Fuzzwork providers; informational only for third-party-only markets.
+                                Required for hub markets. Filled in from the structure for a citadel market read through ESI.
                             </div>
                         </div>
 
@@ -156,7 +157,7 @@
                             <input type="text" name="structure_name" id="structure_name" class="form-control"
                                    value="{{ old('structure_name', $market->structure_name) }}" maxlength="255">
                             <div class="mk-hint">
-                                Optional display label for citadel markets, e.g. <code>1st Taj Mahgoon</code>.
+                                Optional display label for citadel markets, e.g. <code>1st Taj Mahgoon</code>. Filled in from SeAT's structure data for a market read through ESI.
                             </div>
                         </div>
 

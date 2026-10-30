@@ -149,12 +149,10 @@ class ScheduleSeeder extends AbstractScheduleSeeder
     public function getDeprecatedSchedules(): array
     {
         return [
-            // Removed in the 2026-05-27 pivot to third-party providers
-            // (Goonpraisal/Janice/Fuzzwork). The citadel ESI scrape never
-            // worked reliably for large nullsec hubs (CCP pagination
-            // collapse — pages 2..N return identical content to page 1).
-            // Two-step swap pattern: emit here so SeAT prunes the cron row
-            // on installs that ran the 2026-05-26 build.
+            // The separate citadel poll from the 2026-05-26 build. Structure
+            // markets are read by the normal price refresh, so it stays
+            // retired. Two-step swap pattern: emit here so SeAT prunes the
+            // cron row on installs that ran that build.
             'manager-core:poll-citadel-markets',
         ];
     }
