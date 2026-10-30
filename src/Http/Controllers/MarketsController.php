@@ -95,7 +95,7 @@ class MarketsController extends Controller
         }
 
         if (empty($validated['key'])) {
-            $validated['key'] = Str::slug(trim(($validated['system_name'] ?? '') . ' ' . ($validated['structure_name'] ?? $validated['name'])));
+            $validated['key'] = $this->defaultKey($validated);
         }
 
         if ($validated['key'] === '' || Market::where('key', $validated['key'])->exists()) {
@@ -356,6 +356,23 @@ class MarketsController extends Controller
         }
 
         return $validated;
+    }
+
+    /**
+     * Key for a new market left without one: the structure (or display)
+     * name, led by its system unless the name already starts with it, as
+     * SeAT's structure names do ("C-J6MT - 1st Taj Mahgoon").
+     */
+    protected function defaultKey(array $data): string
+    {
+        $label = trim((string) (($data['structure_name'] ?? null) ?: ($data['name'] ?? '')));
+        $system = trim((string) ($data['system_name'] ?? ''));
+
+        if ($system !== '' && stripos($label, $system) !== 0) {
+            $label = $system . ' ' . $label;
+        }
+
+        return Str::slug($label);
     }
 
     /**
