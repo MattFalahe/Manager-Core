@@ -11,8 +11,9 @@ use ManagerCore\Services\Watchdog\WatchdogCheck;
 
 /**
  * Alert when any price provider in use on an ENABLED market, or as a
- * plugin's provider override, reports `isAvailable() === false`, or when
- * Janice turned its last request away.
+ * plugin's provider override, reports `isAvailable() === false`, when
+ * Janice turned its last request away, or when an enabled market's own
+ * provider failed its last refresh outright.
  *
  * Failure modes this catches:
  *   - Operator set a market's provider (or a plugin's override) to 'janice'
@@ -25,10 +26,14 @@ use ManagerCore\Services\Watchdog\WatchdogCheck;
  *     failed every request of its last fetch. A key can be set and still be
  *     refused, which isAvailable() cannot see, so the provider's recorded
  *     last answer is read instead.
+ *   - A market's provider failed its last refresh outright, say a
+ *     structure no Key Pool director can read, or Fuzzwork down. Its prices
+ *     come from the fallback provider or stay cached meanwhile, which is
+ *     exactly why nobody would notice without this.
  *
  * The check collects each unique provider in use and instantiates the
  * provider class to call isAvailable(). Cheap — no upstream HTTP, just
- * credential checks and Janice's recorded last answer.
+ * credential checks, Janice's recorded last answer and the markets' rows.
  */
 class ProviderUnavailableCheck implements WatchdogCheck
 {
@@ -36,7 +41,7 @@ class ProviderUnavailableCheck implements WatchdogCheck
     public function label(): string { return 'Price provider unavailable'; }
     public function description(): string
     {
-        return 'Alerts when a price provider routing an enabled market, or set as a plugin\'s provider override, reports isAvailable=false, or when Janice refused its last request or failed it outright. Typically a missing or refused credential (Janice API key, SeAT prices-core sub-provider).';
+        return 'Alerts when a price provider routing an enabled market, or set as a plugin\'s provider override, reports isAvailable=false, when Janice refused its last request or failed it outright, or when an enabled market\'s provider failed its last refresh outright. Typically a missing or refused credential (Janice API key, SeAT prices-core sub-provider), a provider that is down, or a structure no Key Pool director can read.';
     }
 
     public function run(): ?array
@@ -84,16 +89,40 @@ class ProviderUnavailableCheck implements WatchdogCheck
                 }
             }
 
-            if (empty($unavailable)) {
+            // The row says what failed and what stood in; see
+            // PricingService::recordMarketOutcome.
+            $failing = [];
+            $failingMarkets = Market::where('is_enabled', true)
+                ->whereNotNull('last_refresh_status')
+                ->where('last_refresh_status', '!=', Market::STATUS_OK)
+                ->get();
+            foreach ($failingMarkets as $market) {
+                $detail = trim((string) ($market->last_refresh_error ?: $market->last_refresh_status));
+                if (strlen($detail) > 300) {
+                    $detail = substr($detail, 0, 297) . '...';
+                }
+                $failing[] = "{$market->key} ({$detail})";
+            }
+
+            if (empty($unavailable) && empty($failing)) {
                 return null;
+            }
+
+            $found = [];
+            if (!empty($unavailable)) {
+                $found[] = 'Configured but unavailable: ' . implode('; ', $unavailable) . '.';
+            }
+            if (!empty($failing)) {
+                $found[] = 'Last refresh failed: ' . implode('; ', $failing) . '.';
             }
 
             return [
                 'title' => 'Price provider unavailable',
-                'message' => "Configured but unavailable: " . implode('; ', $unavailable) . ". Prices those providers should fetch keep their cached value meanwhile. Check credentials at MC → Settings (Janice key, Goonpraisal email, SeAT sub-provider chain). See Diagnostics → Price Providers for live test buttons.",
+                'message' => implode(' ', $found) . " Prices those providers should fetch come from the fallback provider or keep their cached value meanwhile. Check credentials at MC → Settings (Janice key, Goonpraisal email, SeAT sub-provider chain) and each market's status on the Markets page. See Diagnostics → Price Providers for live test buttons.",
                 'severity' => 'warning',
                 'context' => [
-                    'unavailable_providers' => implode('; ', $unavailable),
+                    'unavailable_providers' => implode('; ', $unavailable) ?: 'none',
+                    'failing_markets' => implode('; ', $failing) ?: 'none',
                     'providers_in_use' => implode(',', $inUseProviders),
                 ],
             ];

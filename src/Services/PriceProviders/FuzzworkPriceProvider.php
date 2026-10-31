@@ -4,6 +4,7 @@ namespace ManagerCore\Services\PriceProviders;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use ManagerCore\Models\Market;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 
@@ -33,6 +34,8 @@ use ManagerCore\Models\PriceHistory;
  */
 class FuzzworkPriceProvider implements PriceProviderInterface
 {
+    use ReportsFetchFailures;
+
     private const BASE_URL = 'https://market.fuzzwork.co.uk/aggregates/';
     private const HTTP_TIMEOUT = 15;
     private const BATCH_SIZE = 100;
@@ -52,6 +55,8 @@ class FuzzworkPriceProvider implements PriceProviderInterface
 
     public function getPrices(array $typeIds, string $market, bool $persist = true): array
     {
+        $this->resetFetchFailures();
+
         // Initialise result map so missing-data per-type returns null
         // (consumers check `is_array(...)` before reading stats fields).
         $out = array_fill_keys(array_map('intval', $typeIds), null);
@@ -83,10 +88,17 @@ class FuzzworkPriceProvider implements PriceProviderInterface
                         'status' => $response->status(),
                         'region' => $regionId,
                     ]);
+                    $this->recordFetchFailure($chunk, 'Fuzzwork returned HTTP ' . $response->status(), true, Market::STATUS_PROVIDER_DOWN);
                     continue;
                 }
 
-                $data = $response->json() ?: [];
+                $data = $response->json();
+                if (!is_array($data)) {
+                    Log::warning("[Manager Core] Fuzzwork batch {$batchIndex} returned something other than prices");
+                    $this->recordFetchFailure($chunk, 'Fuzzwork returned something other than prices', true, Market::STATUS_PROVIDER_DOWN);
+                    continue;
+                }
+
                 foreach ($chunk as $tid) {
                     $tidInt = (int) $tid;
                     $row = is_array($data[$tid] ?? null) ? $data[$tid] : null;
@@ -104,6 +116,7 @@ class FuzzworkPriceProvider implements PriceProviderInterface
                 }
             } catch (\Throwable $e) {
                 Log::error("[Manager Core] Fuzzwork batch {$batchIndex} exception: " . $e->getMessage());
+                $this->recordFetchFailure($chunk, 'Fuzzwork: ' . $e->getMessage(), true, Market::STATUS_PROVIDER_DOWN);
                 continue;
             }
         }
@@ -229,6 +242,16 @@ class FuzzworkPriceProvider implements PriceProviderInterface
     public function getName(): string
     {
         return 'Fuzzwork Market Aggregator';
+    }
+
+    /**
+     * Whether Fuzzwork prices this market's own region, rather than The
+     * Forge in its place. What decides whether Fuzzwork can stand in for
+     * another provider.
+     */
+    public static function tracksMarket(string $market): bool
+    {
+        return isset(self::HUB_REGIONS[strtolower($market)]);
     }
 
     /**

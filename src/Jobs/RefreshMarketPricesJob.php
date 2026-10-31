@@ -24,6 +24,9 @@ use ManagerCore\Services\PricingService;
  * worker picks it up within seconds (default Redis queue) and fetches the
  * prices via the same `updatePrices` path the scheduled cron uses.
  *
+ * PricingService also queues it, ten minutes on, for the types a refresh
+ * failed to fetch (see $retry).
+ *
  * Idempotency:
  *   - Multiple dispatches for overlapping type sets just refetch the same
  *     prices; the underlying ESI / Janice / Fuzzwork / SeAT providers are read-only.
@@ -62,14 +65,26 @@ class RefreshMarketPricesJob implements ShouldQueue
     public array $backoff = [30, 120, 300];
 
     /**
+     * The one more try for types a refresh failed to fetch. A plain property
+     * rather than a promoted one, so a job queued before it existed still
+     * unserializes with its default.
+     */
+    public bool $retry = false;
+
+    /**
      * @param string $market   Market identifier (jita, amarr, dodixie, hek, rens)
      * @param int[]  $typeIds  Type IDs to refresh — typically the new/missing
      *                         subset returned by registerTypes' diff.
+     * @param bool   $retry    True for the one more try after a failed fetch,
+     *                         which never queues another.
      */
     public function __construct(
         public string $market,
-        public array $typeIds
-    ) {}
+        public array $typeIds,
+        bool $retry = false
+    ) {
+        $this->retry = $retry;
+    }
 
     /**
      * Run the refresh.
@@ -80,7 +95,13 @@ class RefreshMarketPricesJob implements ShouldQueue
             return;
         }
 
-        Log::info("[Manager Core] RefreshMarketPricesJob: refreshing " . count($this->typeIds) . " types for market '{$this->market}'");
+        Log::info("[Manager Core] RefreshMarketPricesJob: refreshing " . count($this->typeIds) . " types for market '{$this->market}'"
+            . ($this->retry ? ' (one more try after a failed fetch)' : ''));
+
+        if ($this->retry) {
+            $pricing->retryPrices($this->market, $this->typeIds);
+            return;
+        }
 
         $pricing->updatePrices($this->market, $this->typeIds);
     }

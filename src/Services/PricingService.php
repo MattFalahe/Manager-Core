@@ -6,9 +6,13 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Collection;
 use ManagerCore\Jobs\RefreshMarketPricesJob;
+use ManagerCore\Models\Market;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 use ManagerCore\Models\TypeSubscription;
+use ManagerCore\Services\PriceProviders\FuzzworkPriceProvider;
+use ManagerCore\Services\PriceProviders\GoonpraisalPriceProvider;
+use ManagerCore\Services\PriceProviders\JanicePriceProvider;
 /**
  * PricingService - Central pricing service for all plugins
  *
@@ -18,6 +22,35 @@ use ManagerCore\Models\TypeSubscription;
  */
 class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
 {
+    /**
+     * The setting naming the provider that stands in for a hub market's own
+     * when it fails, and its value for no stand-in at all.
+     */
+    public const FALLBACK_SETTING = 'pricing.fallback_provider';
+    public const FALLBACK_DEFAULT = 'fuzzwork';
+    public const FALLBACK_NONE = 'none';
+
+    /** Providers that can stand in for a hub market's own. SeAT's prices never do. */
+    public const FALLBACK_PROVIDERS = ['fuzzwork', 'esi', 'janice', 'goonpraisal'];
+
+    /** What each provider is called in a market's status and in the log. */
+    public const PROVIDER_LABELS = [
+        'esi' => 'MCPraisal',
+        'janice' => 'Janice',
+        'fuzzwork' => 'Fuzzwork',
+        'goonpraisal' => 'Goonpraisal',
+        'seat' => 'SeAT Price Provider',
+    ];
+
+    /**
+     * How many of the asked types that already have a price an empty answer
+     * has to cover before it counts as the provider failing, rather than a
+     * list of items nobody trades.
+     */
+    public const PROVIDER_DOWN_MIN_TYPES = 5;
+
+    /** How long types a refresh failed to fetch wait for their one more try. */
+    public const RETRY_DELAY_MINUTES = 10;
 
     /**
      * Get current price for one or more items.
@@ -367,9 +400,11 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
      * (either both-sides ['buy' => ..., 'sell' => ...] or single-side
      * inner stats, depending on $priceType).
      *
-     * Failures (provider unavailable, missing credentials, upstream error,
-     * type not found) → null in the per-type map. Lets reduceStatsToFloat
-     * gracefully return null for missing types.
+     * A provider that fails gets the market's fallback provider, as a
+     * refresh does (see fetchWithFallback), and whatever neither could fetch
+     * keeps the last price MC has cached for the market. A type the provider
+     * answered with no price stays null: that is what it says the item is
+     * worth, and reduceStatsToFloat returns null for it.
      *
      * @param string $providerKey 'esi' | 'janice' | 'fuzzwork' | 'goonpraisal' | 'seat'
      * @param string $market      Market key, e.g. 'jita'
@@ -383,44 +418,25 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
             return [];
         }
 
-        try {
-            $provider = $this->getPriceProvider($providerKey);
+        $typeIds = array_values(array_unique(array_map('intval', $typeIds)));
 
-            // Defensive: skip the upstream call if the provider isn't
-            // configured (e.g. operator picked Janice override without
-            // setting a key). Returns null per-type so reduceStatsToFloat
-            // gives null floats, which consumer plugins handle as "no price".
-            if (method_exists($provider, 'isAvailable') && !$provider->isAvailable()) {
-                Log::warning("[Manager Core] provider_override '{$providerKey}' is not configured; returning nulls for live fetch", [
-                    'market' => $market,
-                    'types' => count($typeIds),
-                ]);
-                return array_fill_keys(array_map('intval', $typeIds), null);
-            }
+        // $persist=false so the provider builds + returns the in-memory map
+        // WITHOUT writing to manager_core_market_prices. The override path
+        // bypasses MC's local cache by design — if we persisted here,
+        // MM-via-Janice writes would clobber the cron's Fuzzwork-Jita data
+        // and SM (no override) would then read Janice prices on the next
+        // cache hit. Caveat: MCPraisal (ESI) provider can't honour
+        // $persist=false (MarketDataService is the whole architecture
+        // there) and logs a warning — see ESIPriceProvider docblock.
+        $outcome = $this->fetchWithFallback($providerKey, $market, $typeIds, false);
+        $raw = $outcome['prices'];
 
-            // PriceProviderInterface contract: getPrices returns
-            //   [type_id => ['buy' => stats, 'sell' => stats] | null]
-            // Pass $persist=false so the provider builds + returns the
-            // in-memory map WITHOUT writing to manager_core_market_prices.
-            // The override path bypasses MC's local cache by design — if
-            // we persisted here, MM-via-Janice writes would clobber the
-            // cron's Fuzzwork-Jita data and SM (no override) would then
-            // read Janice prices on the next cache hit. Caveat: MCPraisal
-            // (ESI) provider can't honour $persist=false (MarketDataService
-            // is the whole architecture there) and logs a warning — see
-            // ESIPriceProvider docblock.
-            $raw = $provider->getPrices(array_map('intval', $typeIds), $market, false);
-        } catch (\Throwable $e) {
-            Log::warning("[Manager Core] provider_override live fetch failed via '{$providerKey}': " . $e->getMessage(), [
-                'market' => $market,
-                'types' => count($typeIds),
-            ]);
-            return array_fill_keys(array_map('intval', $typeIds), null);
+        foreach ($outcome['unanswered'] as $typeId) {
+            $raw[$typeId] = $this->fetchPriceForType($typeId, $market, 'both');
         }
 
         $out = [];
-        foreach ($typeIds as $typeId) {
-            $tid = (int) $typeId;
+        foreach ($typeIds as $tid) {
             $perType = is_array($raw[$tid] ?? null) ? $raw[$tid] : null;
 
             if ($perType === null) {
@@ -437,6 +453,315 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
             }
         }
         return $out;
+    }
+
+    /**
+     * A provider's prices for these types, with a stand-in when it fails.
+     *
+     * A provider fails outright when it prices nothing and either a request
+     * failed or the answer was empty for types that already have a price.
+     * Then the fallback for this market is asked, the same way: stored
+     * under this market by a refresh, returned only by a live read. A type
+     * the provider answered with no price is never a failure, since that is
+     * what it says the item is worth. Types a request failed for are listed
+     * so a refresh can try them again later; they keep their cached price
+     * meanwhile, as does everything a provider and its fallback both miss.
+     *
+     * @return array{prices: array, asked: int, failed: int[], unanswered: int[], provider: string,
+     *               error: ?string, retryable: bool, status: ?string, outright: bool, fallback: ?array}
+     */
+    protected function fetchWithFallback(string $providerKey, string $market, array $typeIds, bool $persist): array
+    {
+        $provider = $this->getPriceProvider($providerKey);
+        $label = self::PROVIDER_LABELS[$providerKey] ?? $provider->getName();
+
+        $freshIds = null;
+
+        if (!$provider->isAvailable()) {
+            $prices = [];
+            $failures = ['type_ids' => $typeIds, 'error' => "{$label} is not set up", 'retryable' => false, 'status' => Market::STATUS_NO_PROVIDER];
+        } else {
+            try {
+                $prices = $provider->getPrices($typeIds, $market, $persist);
+                $failures = $provider->lastFetchFailures();
+                $freshIds = $provider->lastFreshTypeIds();
+            } catch (\Throwable $e) {
+                Log::error("[Manager Core] {$label} failed pricing '{$market}': " . $e->getMessage());
+                $prices = [];
+                $failures = ['type_ids' => $typeIds, 'error' => $e->getMessage(), 'retryable' => true, 'status' => Market::STATUS_PROVIDER_DOWN];
+            }
+        }
+
+        $failed = array_values(array_intersect($typeIds, array_map('intval', $failures['type_ids'] ?? [])));
+
+        // An empty answer only counts against a third-party service, which
+        // can answer with nothing while it is in trouble. MCPraisal reads
+        // CCP's own order book, so an empty answer from it is the market.
+        $outright = empty($this->pricedTypeIds($prices, $failed, $freshIds))
+            && (!empty($failed) || ($freshIds === null && $this->countCached($market, $typeIds) >= self::PROVIDER_DOWN_MIN_TYPES));
+
+        $outcome = [
+            'prices' => $prices,
+            'asked' => count($typeIds),
+            'failed' => $failed,
+            'unanswered' => $failed,
+            'provider' => $label,
+            'error' => $failures['error'] ?? null,
+            'retryable' => (bool) ($failures['retryable'] ?? true),
+            'status' => $failures['status'] ?? null,
+            'outright' => $outright,
+            'fallback' => null,
+        ];
+
+        if (!$outright) {
+            if (!empty($failed)) {
+                Log::warning("[Manager Core] {$label} could not fetch " . count($failed) . ' of ' . count($typeIds) . " type(s) for '{$market}': {$outcome['error']}");
+            }
+
+            return $outcome;
+        }
+
+        $outcome['error'] = $outcome['error'] ?? 'answered with no prices at all';
+
+        // An outright failure leaves every type unanswered, including any it
+        // answered with nothing: that answer is part of the failure.
+        $outcome['unanswered'] = $typeIds;
+
+        $fallback = $this->fallbackFor($market, $providerKey);
+        if ($fallback !== null) {
+            [$fresh, $fallbackError] = $this->askFallback($fallback, $market, $typeIds, $persist);
+
+            foreach ($fresh as $typeId => $stats) {
+                $outcome['prices'][$typeId] = $stats;
+            }
+            $outcome['failed'] = array_values(array_diff($failed, array_keys($fresh)));
+            $outcome['unanswered'] = array_values(array_diff($typeIds, array_keys($fresh)));
+            $outcome['fallback'] = $fallback + ['priced' => count($fresh), 'error' => $fallbackError];
+
+            Log::warning("[Manager Core] {$label} failed for '{$market}' ({$outcome['error']}); {$fallback['label']} priced " . count($fresh) . ' of ' . count($typeIds) . ' type(s) instead'
+                . ($fallbackError !== null ? " ({$fallbackError})" : '') . '.');
+        } else {
+            Log::warning("[Manager Core] {$label} failed for '{$market}' ({$outcome['error']}); nothing stands in for it there, so the cached prices stay.");
+        }
+
+        return $outcome;
+    }
+
+    /**
+     * The fallback's prices for these types, and why it priced none if it
+     * didn't. A refresh stores them under this market. A fallback that reads
+     * another market (a structure in the same system, read through ESI)
+     * updates that market's own prices, which are then copied here.
+     *
+     * @return array{0: array<int, array>, 1: ?string}
+     */
+    protected function askFallback(array $fallback, string $market, array $typeIds, bool $persist): array
+    {
+        $sameMarket = $fallback['market'] === $market;
+
+        try {
+            $provider = $this->getPriceProvider($fallback['provider']);
+            $raw = $provider->getPrices($typeIds, $fallback['market'], $persist && $sameMarket);
+            $failures = $provider->lastFetchFailures();
+            $freshIds = $provider->lastFreshTypeIds();
+        } catch (\Throwable $e) {
+            return [[], $e->getMessage()];
+        }
+
+        $fresh = [];
+        foreach ($this->pricedTypeIds($raw, array_map('intval', $failures['type_ids'] ?? []), $freshIds) as $typeId) {
+            $fresh[$typeId] = $raw[$typeId];
+        }
+
+        if ($persist && !$sameMarket) {
+            foreach ($fresh as $typeId => $stats) {
+                $this->storeStats($typeId, $market, $stats);
+            }
+        }
+
+        return [$fresh, empty($fresh) ? ($failures['error'] ?? 'it had no prices for them either') : null];
+    }
+
+    /**
+     * What stands in for a market's provider when it fails, or null.
+     *
+     * A hub market asks the provider chosen in Settings, or Fuzzwork or
+     * MCPraisal when the choice is the market's own provider or can't price
+     * the market. A citadel market never borrows a hub's prices, which would
+     * be stored as the citadel's: a structure read through ESI asks
+     * Goonpraisal when Goonpraisal tracks its system, and a Goonpraisal
+     * market reads a structure in the same system that another market reads
+     * through ESI. SeAT's prices never stand in.
+     *
+     * @return array{provider: string, market: string, label: string}|null
+     */
+    public function fallbackFor(string $market, string $provider): ?array
+    {
+        $choice = (string) \ManagerCore\Helpers\Settings::get(self::FALLBACK_SETTING, null, self::FALLBACK_DEFAULT);
+        if ($choice === self::FALLBACK_NONE) {
+            return null;
+        }
+
+        $config = Market::getMarketConfig($market);
+
+        if (($config['market_type'] ?? Market::TYPE_HUB) === Market::TYPE_CITADEL) {
+            if ($provider !== 'goonpraisal' && GoonpraisalPriceProvider::marketSlug($market) !== null) {
+                return ['provider' => 'goonpraisal', 'market' => $market, 'label' => 'Goonpraisal'];
+            }
+
+            $sibling = $provider !== 'esi' ? $this->structureMarketInSystem($market, $config) : null;
+
+            return $sibling !== null
+                ? ['provider' => 'esi', 'market' => $sibling, 'label' => "MCPraisal (through the '{$sibling}' market)"]
+                : null;
+        }
+
+        foreach (array_unique([$choice, 'fuzzwork', 'esi']) as $candidate) {
+            if ($candidate === $provider || !in_array($candidate, self::FALLBACK_PROVIDERS, true)) {
+                continue;
+            }
+
+            $canPrice = match ($candidate) {
+                'fuzzwork' => FuzzworkPriceProvider::tracksMarket($market),
+                'janice' => JanicePriceProvider::tracksMarket($market),
+                'goonpraisal' => GoonpraisalPriceProvider::marketSlug($market) !== null,
+                default => !empty($config['region_id']),
+            };
+
+            if ($canPrice && $this->getPriceProvider($candidate)->isAvailable()) {
+                return ['provider' => $candidate, 'market' => $market, 'label' => self::PROVIDER_LABELS[$candidate]];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Another enabled market that reads a structure in this market's system
+     * through ESI, matched by the system's ID or its name.
+     */
+    protected function structureMarketInSystem(string $market, ?array $config): ?string
+    {
+        $systemId = (int) ($config['system_id'] ?? 0);
+        $systemName = strtoupper(trim((string) ($config['system_name'] ?? '')));
+
+        if ($systemId === 0 && $systemName === '') {
+            return null;
+        }
+
+        try {
+            $candidates = Market::where('market_type', Market::TYPE_CITADEL)
+                ->where('provider', 'esi')
+                ->where('is_enabled', true)
+                ->get();
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        foreach ($candidates as $candidate) {
+            if ($candidate->key === $market || !$candidate->isStructureMarket()) {
+                continue;
+            }
+
+            if (($systemId !== 0 && (int) $candidate->system_id === $systemId)
+                || ($systemName !== '' && strtoupper(trim((string) $candidate->system_name)) === $systemName)) {
+                return $candidate->key;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Types with a fresh buy or sell price in a provider's answer: not one
+     * its report says failed, and when it lists what it priced fresh, one of
+     * those. MCPraisal hands the rest back at their cached price.
+     *
+     * @param int[]|null $freshIds
+     * @return int[]
+     */
+    protected function pricedTypeIds(array $prices, array $failedIds, ?array $freshIds = null): array
+    {
+        $failed = array_flip($failedIds);
+        $fresh = $freshIds === null ? null : array_flip($freshIds);
+        $priced = [];
+
+        foreach ($prices as $typeId => $stats) {
+            if (isset($failed[(int) $typeId]) || ($fresh !== null && !isset($fresh[(int) $typeId])) || !is_array($stats)) {
+                continue;
+            }
+
+            foreach (['buy', 'sell'] as $side) {
+                $s = $stats[$side] ?? null;
+                if (is_array($s) && ((float) ($s['min'] ?? 0) > 0 || (float) ($s['max'] ?? 0) > 0)) {
+                    $priced[] = (int) $typeId;
+                    break;
+                }
+            }
+        }
+
+        return $priced;
+    }
+
+    /** How many of these types have a cached price at this market. */
+    protected function countCached(string $market, array $typeIds): int
+    {
+        try {
+            return (int) MarketPrice::where('market', $market)
+                ->whereIn('type_id', $typeIds)
+                ->distinct()
+                ->count('type_id');
+        } catch (\Throwable $e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Write one type's stats the way a provider would, for a fallback that
+     * priced it from another market's read. A side with no price is left as
+     * it is.
+     */
+    protected function storeStats(int $typeId, string $market, array $stats): void
+    {
+        foreach (['buy', 'sell'] as $side) {
+            $s = is_array($stats[$side] ?? null) ? $stats[$side] : null;
+            if ($s === null || ((float) ($s['min'] ?? 0) <= 0 && (float) ($s['max'] ?? 0) <= 0)) {
+                continue;
+            }
+
+            MarketPrice::updateOrCreate(
+                [
+                    'type_id' => $typeId,
+                    'market' => $market,
+                    'price_type' => $side,
+                ],
+                [
+                    'price_min' => (float) ($s['min'] ?? 0),
+                    'price_max' => (float) ($s['max'] ?? 0),
+                    'price_avg' => (float) ($s['avg'] ?? 0),
+                    'price_median' => (float) ($s['median'] ?? 0),
+                    'price_percentile' => (float) ($s['percentile'] ?? 0),
+                    'price_stddev' => (float) ($s['stddev'] ?? 0),
+                    'volume' => (int) ($s['volume'] ?? 0),
+                    'order_count' => (int) ($s['order_count'] ?? 0),
+                    'strategy' => (string) ($s['strategy'] ?? 'fallback'),
+                    'updated_at' => now(),
+                ]
+            );
+        }
+
+        $buy = is_array($stats['buy'] ?? null) ? $stats['buy'] : [];
+        $sell = is_array($stats['sell'] ?? null) ? $stats['sell'] : [];
+
+        PriceHistory::recordDay(
+            $typeId,
+            $market,
+            (float) ($buy['avg'] ?? 0),
+            (float) ($buy['max'] ?? 0),
+            (float) ($sell['avg'] ?? 0),
+            (float) ($sell['min'] ?? 0),
+            (int) (($buy['volume'] ?? 0) + ($sell['volume'] ?? 0))
+        );
     }
 
     /**
@@ -789,6 +1114,21 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
      */
     public function updatePrices($market = 'jita', $typeIds = null, ?string $providerOverride = null)
     {
+        $this->refreshMarket((string) $market, $typeIds, $providerOverride, true);
+    }
+
+    /**
+     * One more try for types a refresh failed to fetch, from the job that
+     * refresh queued. A second failure waits for the next scheduled refresh
+     * rather than queueing a third try.
+     */
+    public function retryPrices(string $market, array $typeIds): void
+    {
+        $this->refreshMarket($market, $typeIds, null, false);
+    }
+
+    protected function refreshMarket(string $market, $typeIds, ?string $providerOverride, bool $mayRetry): void
+    {
         // If no specific type IDs provided, get all subscribed types
         if ($typeIds === null) {
             $subscribedTypes = $this->getSubscribedTypes($market);
@@ -801,30 +1141,45 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
             $typeIds = $subscribedTypes[$market]->pluck('type_id')->unique()->toArray();
         }
 
+        $typeIds = array_values(array_unique(array_map('intval', (array) $typeIds)));
+        if (empty($typeIds)) {
+            return;
+        }
+
         // Resolution order for which provider class to use:
         //   1. Explicit override (from per-appraisal selector or test)
         //   2. Per-market provider stored on the manager_core_markets row
-        //   3. Hard-coded 'fuzzwork' fail-safe inside getPriceProvider()
+        //   3. Hard-coded 'fuzzwork' fail-safe
         // The "global default" Setting was removed in v1.0.0; per-market
         // routing is the single source of truth.
         $effectiveProvider = $providerOverride
-            ?? $this->resolveMarketProvider($market);
+            ?? $this->resolveMarketProvider($market)
+            ?? 'fuzzwork';
 
         Log::info("[Manager Core] Updating prices for " . count($typeIds) . " types in market: {$market}"
             . ($providerOverride
                 ? " (provider override: {$providerOverride})"
-                : " (provider: " . ($effectiveProvider ?? 'fail-safe fuzzwork') . ")"));
+                : " (provider: {$effectiveProvider})"));
 
-        $priceProvider = $this->getPriceProvider($effectiveProvider);
+        if ($providerOverride !== null) {
+            // A provider picked for one appraisal, or by a Diagnostics test,
+            // is asked on its own: nothing stands in for it, nothing is
+            // tried again, and the market's status stays about the market's
+            // own provider. What it can't price keeps the cached price the
+            // appraisal then reads.
+            $priceProvider = $this->getPriceProvider($providerOverride);
 
-        if (!$priceProvider->isAvailable()) {
-            Log::error("[Manager Core] Price provider '{$priceProvider->getName()}' is not available");
-            return;
+            if (!$priceProvider->isAvailable()) {
+                Log::error("[Manager Core] Price provider '{$priceProvider->getName()}' is not available");
+                return;
+            }
+
+            $priceProvider->getPrices($typeIds, $market);
+        } else {
+            $outcome = $this->fetchWithFallback($effectiveProvider, $market, $typeIds, true);
+            $retrying = $mayRetry && $this->scheduleRetry($market, $outcome);
+            $this->recordMarketOutcome($market, $outcome, $retrying);
         }
-
-        Log::info("[Manager Core] Using price provider: {$priceProvider->getName()}");
-
-        $priceProvider->getPrices($typeIds, $market);
 
         // Bump the per-market cache version so any cached getPrice/getPrices
         // results for this market are invalidated. Without this, a previous
@@ -834,6 +1189,83 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         // (single Redis INCR) and ensures the very next getPrice call reads
         // straight from the DB.
         $this->bumpPriceCacheVersion($market);
+    }
+
+    /**
+     * Queue one more try, ten minutes on, for the types a request failed
+     * for. Not when trying again can't help (a refused key, a missing
+     * setting), and not when this market already has a try queued: those
+     * types keep their cached price until the next scheduled refresh.
+     * Returns whether a try is coming.
+     */
+    protected function scheduleRetry(string $market, array $outcome): bool
+    {
+        if (empty($outcome['failed']) || !$outcome['retryable']) {
+            return false;
+        }
+
+        try {
+            if (!Cache::add('mc.pricing.retry.' . $market, now()->toIso8601String(), self::RETRY_DELAY_MINUTES * 60)) {
+                return false;
+            }
+
+            RefreshMarketPricesJob::dispatch($market, $outcome['failed'], true)
+                ->delay(now()->addMinutes(self::RETRY_DELAY_MINUTES));
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::warning("[Manager Core] Could not queue another try for '{$market}': " . $e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * Keep how the market's own provider did on the market's row, for the
+     * Markets page and the Watchdog. A refresh that lost a few types still
+     * counts as working: they keep their cached price and are asked for
+     * again, and the row notes them.
+     */
+    protected function recordMarketOutcome(string $market, array $outcome, bool $retrying): void
+    {
+        try {
+            $row = Market::where('key', $market)->first();
+            if (!$row) {
+                return;
+            }
+
+            $error = rtrim((string) $outcome['error'], '. ');
+            $again = $retrying ? ' Asked for again in ' . self::RETRY_DELAY_MINUTES . ' minutes.' : '';
+
+            if (!$outcome['outright']) {
+                $row->recordRefresh(
+                    Market::STATUS_OK,
+                    empty($outcome['failed'])
+                        ? null
+                        : count($outcome['failed']) . " of {$outcome['asked']} type(s) failed ({$error}), so they keep their cached price." . $again
+                );
+
+                return;
+            }
+
+            $message = "{$outcome['provider']}: {$error}.";
+            $fallback = $outcome['fallback'];
+
+            if ($fallback === null) {
+                $message .= ' Nothing stands in for it at this market, so the cached prices stay.';
+            } elseif ($fallback['priced'] > 0) {
+                $message .= " {$fallback['label']} priced {$fallback['priced']} of {$outcome['asked']} type(s) meanwhile.";
+            } else {
+                $message .= " {$fallback['label']} could not stand in either (" . rtrim((string) $fallback['error'], '. ') . '), so the cached prices stay.';
+            }
+
+            $row->recordRefresh(
+                $outcome['status'] ?? ($outcome['retryable'] ? Market::STATUS_PROVIDER_DOWN : Market::STATUS_ERROR),
+                $message . $again
+            );
+        } catch (\Throwable $e) {
+            Log::warning("[Manager Core] Could not record how the refresh of '{$market}' went: " . $e->getMessage());
+        }
     }
 
     /**
@@ -954,10 +1386,8 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
     protected function resolveMarketProvider(string $marketKey): ?string
     {
         try {
-            $row = \DB::table('manager_core_markets')
-                ->where('key', $marketKey)
-                ->first(['provider']);
-            return $row && !empty($row->provider) ? $row->provider : null;
+            $provider = Market::where('key', $marketKey)->value('provider');
+            return !empty($provider) ? (string) $provider : null;
         } catch (\Throwable $e) {
             // Table missing during install / fresh boot; fall back.
             return null;

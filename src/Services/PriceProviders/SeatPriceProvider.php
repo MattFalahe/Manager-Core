@@ -4,6 +4,7 @@ namespace ManagerCore\Services\PriceProviders;
 
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Collection;
+use ManagerCore\Models\Market;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 
@@ -12,6 +13,8 @@ use ManagerCore\Models\PriceHistory;
  */
 class SeatPriceProvider implements PriceProviderInterface
 {
+    use ReportsFetchFailures;
+
     /**
      * Get prices for given type IDs using SeAT's price provider system
      *
@@ -21,10 +24,16 @@ class SeatPriceProvider implements PriceProviderInterface
      */
     public function getPrices(array $typeIds, string $market, bool $persist = true): array
     {
+        $this->resetFetchFailures();
         $out = array_fill_keys(array_map('intval', $typeIds), null);
+
+        if (empty($typeIds)) {
+            return $out;
+        }
 
         if (!$this->isAvailable()) {
             Log::warning("[Manager Core] SeAT Price Provider is not available");
+            $this->recordFetchFailure(array_keys($out), 'SeAT Price Provider is not set up', false);
             return $out;
         }
 
@@ -35,6 +44,7 @@ class SeatPriceProvider implements PriceProviderInterface
             $priceProvider = $this->getPriceProviderInstance();
             if (!$priceProvider) {
                 Log::error("[Manager Core] Failed to get price provider instance");
+                $this->recordFetchFailure(array_keys($out), 'SeAT Price Provider could not be loaded', false);
                 return $out;
             }
 
@@ -85,6 +95,7 @@ class SeatPriceProvider implements PriceProviderInterface
             Log::error("[Manager Core] Error fetching prices from SeAT provider: " . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
+            $this->recordFetchFailure(array_keys($out), 'SeAT Price Provider: ' . $e->getMessage(), true, Market::STATUS_PROVIDER_DOWN);
             return $out;
         }
     }

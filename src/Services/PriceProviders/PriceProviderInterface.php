@@ -40,6 +40,26 @@ interface PriceProviderInterface
     public function getPrices(array $typeIds, string $market, bool $persist = true): array;
 
     /**
+     * The types the last getPrices() call could not fetch because a request
+     * failed, what the last failure said, and whether asking again later can
+     * help. A type the provider answered with no price is not a failure.
+     * PricingService decides from this whether the fallback provider stands
+     * in and which types are asked for again.
+     *
+     * @return array{type_ids: int[], error: ?string, retryable: bool, status: ?string}
+     */
+    public function lastFetchFailures(): array;
+
+    /**
+     * The types the last getPrices() call priced fresh, from a provider
+     * whose answer also carries cached prices (MCPraisal reads its answer
+     * back from the cache), or null when every price in the answer is fresh.
+     *
+     * @return int[]|null
+     */
+    public function lastFreshTypeIds(): ?array;
+
+    /**
      * Get the name of this price provider
      *
      * @return string

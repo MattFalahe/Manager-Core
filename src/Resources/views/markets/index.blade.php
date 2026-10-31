@@ -97,7 +97,11 @@
                                     @if($market->last_refresh_status === \ManagerCore\Models\Market::STATUS_OK)
                                         <span class="mk-status-ok"><i class="fas fa-check-circle"></i> OK</span>
                                     @else
-                                        <span class="mk-status-err"><i class="fas fa-exclamation-circle"></i> {{ $market->last_refresh_status }}</span>
+                                        <span class="mk-status-err"
+                                              data-toggle="tooltip"
+                                              title="{{ $market->last_refresh_error }}">
+                                            <i class="fas fa-exclamation-circle"></i> {{ $market->last_refresh_status }}
+                                        </span>
                                     @endif
                                 @else
                                     <span class="mk-meta">never</span>

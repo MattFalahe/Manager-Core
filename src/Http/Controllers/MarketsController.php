@@ -255,9 +255,15 @@ class MarketsController extends Controller
 
         $market->refresh();
 
-        // Confirm Tritanium got a price recorded for this market. Most
-        // providers don't write last_refresh_status on success (only the
-        // ESI path does), so check the actual MarketPrice rows.
+        // The status says whether the market's own provider answered. A
+        // Tritanium row alone could be the fallback provider's, standing in
+        // for a provider that failed.
+        if ($market->last_refresh_status !== Market::STATUS_OK) {
+            return back()->with('error',
+                "Test fetch via provider '{$market->provider}' failed for '{$market->name}': " .
+                ($market->last_refresh_error ?: 'see laravel.log for the provider\'s specific error.'));
+        }
+
         $priced = \ManagerCore\Models\MarketPrice::where('market', $market->key)
             ->where('type_id', 34)
             ->exists();
@@ -268,10 +274,8 @@ class MarketsController extends Controller
                 "Tritanium price is now cached. You can select this market in any plugin's pricing preference.");
         }
 
-        $errorTail = $market->last_refresh_error ? " Details: {$market->last_refresh_error}" : '';
         return back()->with('error',
-            "Test fetch ran via provider '{$market->provider}' but no Tritanium price was recorded for '{$market->key}'. " .
-            "Check the laravel.log for the provider's specific error." . $errorTail);
+            "Test fetch ran via provider '{$market->provider}', which answered, but it has no Tritanium price for '{$market->key}'.");
     }
 
     /**

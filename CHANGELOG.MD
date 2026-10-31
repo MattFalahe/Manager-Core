@@ -28,9 +28,23 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 - **A missing price never replaces a cached one.** Anything Janice has no price for, or that a failed request left out, keeps its cached price and its old timestamp.
 - **A refused key is reported.** Janice's last answer is kept for the whole install, since one key serves every market and every plugin override. The Watchdog's `provider_unavailable` check names a refused or failing Janice, and now also covers providers used only as a plugin's provider override. Diagnostics, Master Test says the same under Per-market provider config. Saving a new key clears it, and the next fetch shows whether Janice takes the new one.
 
+### 🛟 When a price provider fails
+
+- **A fallback provider stands in.** When a market's provider fails outright (every request fails, or it answers with no prices at all for items it priced before), Manager Core asks a fallback provider for the same market, the way Mining Manager does. Pick it under Settings → Pricing → Fallback Provider: Fuzzwork by default, or MCPraisal, Janice, Goonpraisal or None. When the choice is the market's own provider, or can't price that market, Fuzzwork or MCPraisal is asked instead. Until now a failed refresh left the prices to go stale until the next one.
+- **Citadel markets stand in for each other, never a hub.** A structure read through ESI that fails asks Goonpraisal when Goonpraisal tracks its system (C-J6MT, UALX-3 and the rest). A Goonpraisal market that fails reads a structure in the same system that another of your markets reads through ESI.
+- **The last price stays when nothing can stand in.** Whatever the fallback can't price keeps its cached price. Nothing writes a zero, and SeAT's prices never stand in. An item a provider answers with no price stays unpriced: only a failure gets a stand-in.
+- **Plugins with a provider override get the same.** A plugin reading through an override (Mining Manager through Janice, say) gets the fallback when that provider fails, and Manager Core's cached price for that market for anything still missing. It used to get nothing back.
+- **Failed requests are asked again.** Items a refresh couldn't fetch because a request failed are fetched again ten minutes later, once. A refused key or a missing setting isn't retried, since asking again can't fix it.
+- **A structure read retries a bad page.** A page that fails with an ESI server error, or gets no answer, is read again up to twice, a few seconds apart, instead of throwing away the whole read.
+- **You can see it.** Each market's row on the Markets page now says how its own provider did on the last refresh, whichever provider that is: hover the status for what failed and what stood in. The Watchdog's `provider_unavailable` check reports a market whose provider failed its last refresh outright, which also covers a structure market nobody can read.
+
 ### 🐛 Fixes
 
 - **Price history wrote zeros for a side with no orders.** Each refresh wrote the day's buy and sell figures together, so a refresh that found orders on one side only, common on structure markets, wrote a zero over the other side's figure for the day, and a type with no orders at all got a row of zeros. That skewed the price trend (`pricing.getTrend` and the API's trend endpoint). Every provider now records only the side that has a price, and nothing for a type with none.
+- **An MCPraisal hub refresh stopped at the first timeout.** A request that timed out came back from the parallel batch as an error rather than an answer, and reading it as one ended the whole refresh of that market. It now counts as a failed request and is asked again later.
+- **MCPraisal priced a type from part of its order book** when a later page of it failed, and the best orders could be on the page that didn't come back. The type now keeps its cached price and is asked again later.
+- **Test on the Markets page** said a market worked whenever it had any Tritanium price, even an old one. It now goes by how the market's provider did.
+- **Goonpraisal waited after its last batch** and not after a failed one. It now waits between batches only.
 - **Active Plugins count on Diagnostics.** It showed every active registry row over the size of the suite list, so a self-registered plugin pushed it past the total (8 / 7). Both numbers now cover the same plugins.
 - **Plugin Connections tests** now run against a fresh Plugin Bridge scan, as the Plugin Bridge page does. The cached scan is built while Manager Core boots, before the plugins that load after it have registered their ESI handlers, so Mining Manager and Structure Manager tested with no ESI handlers, and a plugin wired only through ESI tested as Standalone.
 

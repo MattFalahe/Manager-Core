@@ -35,6 +35,8 @@ use ManagerCore\Models\Setting;
  */
 class JanicePriceProvider implements PriceProviderInterface
 {
+    use ReportsFetchFailures;
+
     private const PRICER_URL = 'https://janice.e-351.com/api/rest/v2/pricer';
     private const HTTP_TIMEOUT = 30;
 
@@ -91,6 +93,9 @@ class JanicePriceProvider implements PriceProviderInterface
     /** Ids the current fetch gave up on because its time ran out. */
     protected int $unasked = 0;
 
+    /** Ids that went out in a request Janice answered, priced or not. */
+    protected array $askedIds = [];
+
     protected float $deadline = 0.0;
 
     public function __construct()
@@ -100,6 +105,7 @@ class JanicePriceProvider implements PriceProviderInterface
 
     public function getPrices(array $typeIds, string $market, bool $persist = true): array
     {
+        $this->resetFetchFailures();
         $out = array_fill_keys(array_map('intval', $typeIds), null);
 
         if (empty($typeIds)) {
@@ -108,6 +114,7 @@ class JanicePriceProvider implements PriceProviderInterface
 
         if (empty($this->apiKey)) {
             Log::warning("[Manager Core] Janice provider: no API key configured. Set pricing.janice_api_key in MC Settings.");
+            $this->recordFetchFailure(array_keys($out), 'Janice has no API key', false);
             return $out;
         }
 
@@ -119,6 +126,7 @@ class JanicePriceProvider implements PriceProviderInterface
         $this->requestErrors = 0;
         $this->lastError = null;
         $this->unasked = 0;
+        $this->askedIds = [];
         $this->deadline = $this->clock() + self::TIME_BUDGET_SECONDS;
 
         $items = [];
@@ -144,6 +152,19 @@ class JanicePriceProvider implements PriceProviderInterface
 
         if ($this->unasked > 0) {
             Log::warning("[Manager Core] Janice: ran out of time with {$this->unasked} types not asked for; they keep their cached prices until the next run");
+        }
+
+        // Everything no answered request covered: pieces the retreat gave up
+        // on, the rest of a refused fetch, and what time ran out for. A 429
+        // is worth another try later; a refused key isn't until it changes.
+        $unanswered = array_values(array_diff(array_keys($out), array_keys($this->askedIds)));
+        if (!empty($unanswered)) {
+            if ($refusal !== null) {
+                $tooMany = $refusal->getCode() === 429;
+                $this->recordFetchFailure($unanswered, $refusal->getMessage(), $tooMany, $tooMany ? Market::STATUS_RATE_LIMITED : Market::STATUS_ERROR);
+            } else {
+                $this->recordFetchFailure($unanswered, $this->lastError ?? 'Janice ran out of time before asking for them', true, Market::STATUS_PROVIDER_DOWN);
+            }
         }
 
         $answered = 0;
@@ -196,6 +217,15 @@ class JanicePriceProvider implements PriceProviderInterface
     }
 
     /**
+     * Whether Janice prices this market key itself, rather than Jita in its
+     * place. What decides whether Janice can stand in for another provider.
+     */
+    public static function tracksMarket(string $market): bool
+    {
+        return isset(self::MARKET_PARAMS[strtolower(trim($market))]);
+    }
+
+    /**
      * One batch, with a staged retreat when the request itself fails.
      *
      * @return array<int, array> PricerItems keyed by type id
@@ -204,7 +234,13 @@ class JanicePriceProvider implements PriceProviderInterface
     protected function fetchBatch(array $typeIds, string $marketParam, int $depth = 0): array
     {
         try {
-            return $this->pricerRequest($typeIds, $marketParam);
+            $items = $this->pricerRequest($typeIds, $marketParam);
+
+            foreach ($typeIds as $typeId) {
+                $this->askedIds[(int) $typeId] = true;
+            }
+
+            return $items;
         } catch (JaniceRefusedException $e) {
             throw $e;
         } catch (\Exception $e) {
