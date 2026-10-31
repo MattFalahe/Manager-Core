@@ -1188,8 +1188,8 @@ class DiagnosticController extends Controller
                 if ($failure !== null) {
                     $since = $failure['since'] ? Carbon::parse($failure['since'])->utc()->format('Y-m-d H:i') . ' UTC' : 'its last fetch';
                     return $failure['state'] === 'refused'
-                        ? ['status' => 'fail', 'message' => ($failure['error'] ?? 'Janice refused the request') . ", since {$since}. Prices it should fetch keep their cached value. Fix the key at Settings → Pricing, then test Janice on the Price Providers tab."]
-                        : ['status' => 'warn', 'message' => "Every request of Janice's last fetch failed, since {$since}. Prices it should fetch keep their cached value until it answers again.", 'detail' => $failure['error'] ?? null];
+                        ? ['status' => 'fail', 'message' => ($failure['error'] ?? 'Janice refused the request') . ", since {$since}. Prices it should fetch come from the fallback provider or keep their cached value. Fix the key at Settings → Pricing, then test Janice on the Price Providers tab."]
+                        : ['status' => 'warn', 'message' => "Every request of Janice's last fetch failed, since {$since}. Prices it should fetch come from the fallback provider or keep their cached value until it answers again.", 'detail' => $failure['error'] ?? null];
                 }
             }
 
