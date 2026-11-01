@@ -389,6 +389,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'topics_usage_title' => 'Consumer pattern',
     'topics_usage_code' => 'if (class_exists(\\ManagerCore\\Topics::class)) {
     \\ManagerCore\\Topics::publish(\'mining.tax_created\', [
+        \'tax_id\'       => $taxId,
         \'character_id\' => $charId,
         \'period\'       => $period,
         \'amount_owed\'  => $amount,

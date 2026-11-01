@@ -20,6 +20,7 @@ use ManagerCore\Services\EventBus;
  *
  *     if (class_exists(\ManagerCore\Topics::class)) {
  *         \ManagerCore\Topics::publish('mining.tax_created', [
+ *             'tax_id'       => $taxId,
  *             'character_id' => $charId,
  *             'period'       => $period,
  *             'amount'       => $amount,
