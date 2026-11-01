@@ -150,6 +150,12 @@ class Topics
                 'idempotency_template' => 'tax_overdue:{tax_id}',
                 'description' => 'A mining tax bill nothing was paid on passed its due date.',
             ],
+            'mining.tax_written_off' => [
+                'publisher' => 'mining-manager',
+                'required' => ['tax_id', 'character_id', 'status'],
+                'idempotency_template' => 'tax_written_off:{tax_id}',
+                'description' => 'A director let a mining tax bill off (status waived or exempted). Nothing is left to pay on it.',
+            ],
             'mining.invoice_sent' => [
                 'publisher' => 'mining-manager',
                 'required' => ['invoice_id'],
@@ -161,6 +167,14 @@ class Topics
                 'required' => ['incident_id'],
                 'idempotency_template' => 'theft_detected:{incident_id}',
                 'description' => 'A mining theft incident was recorded by the theft detector.',
+            ],
+            // An incident can close, reopen and close again, so the key carries
+            // when it closed.
+            'mining.theft_resolved' => [
+                'publisher' => 'mining-manager',
+                'required' => ['incident_id', 'character_id', 'status'],
+                'idempotency_template' => 'theft_resolved:{incident_id}:{resolved_at}',
+                'description' => 'A mining theft incident closed (status resolved, false_alarm, or removed_paid once nothing was overdue).',
             ],
             'mining.jackpot_detected' => [
                 'publisher' => 'mining-manager',
