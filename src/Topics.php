@@ -127,23 +127,27 @@ class Topics
     {
         return [
             // -------- Mining Manager --------
+            // Bill events are keyed on the bill. A character can have two bills
+            // in one calendar month (twice-monthly or weekly billing), and
+            // `period` is that month, so a period key took the second for a
+            // repeat. Mining Manager has sent tax_id since 2.0.0.
             'mining.tax_created' => [
                 'publisher' => 'mining-manager',
-                'required' => ['character_id', 'period'],
-                'idempotency_template' => 'tax_created:{period}:{character_id}',
-                'description' => 'A monthly mining tax record was created for a character.',
+                'required' => ['tax_id', 'character_id', 'period'],
+                'idempotency_template' => 'tax_created:{tax_id}',
+                'description' => 'A mining tax bill was raised for a character, one per billing period (monthly, twice monthly or weekly).',
             ],
             'mining.tax_paid' => [
                 'publisher' => 'mining-manager',
-                'required' => ['character_id', 'period'],
-                'idempotency_template' => 'tax_paid:{period}:{character_id}',
-                'description' => 'A character paid an outstanding mining tax invoice.',
+                'required' => ['tax_id', 'character_id', 'period'],
+                'idempotency_template' => 'tax_paid:{tax_id}',
+                'description' => 'A mining tax bill was paid in full, by the wallet, held credit or a director.',
             ],
             'mining.tax_overdue' => [
                 'publisher' => 'mining-manager',
-                'required' => ['character_id', 'period'],
-                'idempotency_template' => 'tax_overdue:{period}:{character_id}',
-                'description' => 'A mining tax invoice passed its due date without payment.',
+                'required' => ['tax_id', 'character_id', 'period'],
+                'idempotency_template' => 'tax_overdue:{tax_id}',
+                'description' => 'A mining tax bill nothing was paid on passed its due date.',
             ],
             'mining.invoice_sent' => [
                 'publisher' => 'mining-manager',
