@@ -38,8 +38,15 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 - **A structure read retries a bad page.** A page that fails with an ESI server error, or gets no answer, is read again up to twice, a few seconds apart, instead of throwing away the whole read.
 - **You can see it.** Each market's row on the Markets page now says how its own provider did on the last refresh, whichever provider that is: hover the status for what failed and what stood in. The Watchdog's `provider_unavailable` check reports a market whose provider failed its last refresh outright, which also covers a structure market nobody can read.
 
+### 🆕 New Mining Manager topics
+
+- **`mining.theft_resolved`**, when a theft incident closes: resolved or called a false alarm by a director, or taken off the list once nothing was overdue (`status` is `resolved`, `false_alarm` or `removed_paid`). An incident can close, reopen and close again, so its key carries when it closed: `theft_resolved:{incident_id}:{resolved_at}`.
+- **`mining.tax_written_off`**, when a director lets a bill off (`status` is `waived` or `exempted`). It carries the same bill fields as the other bill events, with nothing outstanding.
+- Mining Manager sends both from 3.0.0, so a plugin that heard about the theft or the bill hears how it ended. The registry grows to **62 entries** (was 60).
+
 ### 🐛 Fixes
 
+- **Mining Manager's bill events took a second bill in the same month for a repeat.** `mining.tax_created`, `mining.tax_paid` and `mining.tax_overdue` were keyed on the month and the character. Someone billed twice a month or weekly has two bills in a month, so when both were raised within the hour the second was dropped as a duplicate. They are keyed on the bill now (`tax_created:{tax_id}` and so on) and need `tax_id`, which Mining Manager has sent since 2.0.0.
 - **Price history wrote zeros for a side with no orders.** Each refresh wrote the day's buy and sell figures together, so a refresh that found orders on one side only, common on structure markets, wrote a zero over the other side's figure for the day, and a type with no orders at all got a row of zeros. That skewed the price trend (`pricing.getTrend` and the API's trend endpoint). Every provider now records only the side that has a price, and nothing for a type with none.
 - **An MCPraisal hub refresh stopped at the first timeout.** A request that timed out came back from the parallel batch as an error rather than an answer, and reading it as one ended the whole refresh of that market. It now counts as a failed request and is asked again later.
 - **MCPraisal priced a type from part of its order book** when a later page of it failed, and the best orders could be on the page that didn't come back. The type now keeps its cached price and is asked again later.
