@@ -102,11 +102,13 @@
                     <ul class="list-group">
                         @foreach($statistics['plugins'] as $name => $plugin)
                         <li class="list-group-item d-flex justify-content-between align-items-center">
-                            {{ $name }}
-                            @if($plugin['active'])
+                            {{ $plugin['name'] ?? $name }}
+                            @if(($plugin['status'] ?? '') === 'active')
                                 <span class="badge badge-success">Active</span>
+                            @elseif(($plugin['status'] ?? '') === 'error')
+                                <span class="badge badge-danger">Error</span>
                             @else
-                                <span class="badge badge-secondary">Inactive</span>
+                                <span class="badge badge-secondary">Installed</span>
                             @endif
                         </li>
                         @endforeach

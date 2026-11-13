@@ -251,7 +251,7 @@
                         <div class="tab-description">
                             <p>
                                 <i class="fas fa-info-circle"></i>
-                                <strong>What this tab does:</strong> Per-provider credentials (Janice API key, Goonpraisal contact email, SeAT sub-provider chain) for any provider you might route a market through. Cache TTL and default market for plugins that haven't declared a preference also live here.
+                                <strong>What this tab does:</strong> Per-provider credentials (Janice API key, Goonpraisal contact email, SeAT sub-provider chain) for any provider you might route a market through, and the provider that stands in when one fails. Cache TTL and default market for plugins that haven't declared a preference also live here.
                                 <strong>When to use:</strong> first-install setup, or whenever you add a market that routes through Janice or SeAT (both need credentials before MC can use them).
                                 <strong>Heads up:</strong> there is no "global default provider" anymore. Resolution is per-appraisal override (on the Appraisal form) → per-market provider (on the <a href="{{ route('manager-core.markets.index') }}">Markets page</a>) → hard-coded Fuzzwork fail-safe. Configure credentials below, then assign providers per market on the Markets page.
                             </p>
@@ -320,6 +320,36 @@
                                 @endif
                             </small>
                             @error('seat_price_provider')
+                            <div class="invalid-feedback">{{ $message }}</div>
+                            @enderror
+                        </div>
+
+                        <h5 class="mt-4 mb-3 text-muted" style="font-size: 1rem;">When a provider fails</h5>
+
+                        @php
+                            $fallbackChoice = old('fallback_provider', $settings['fallback_provider'] ?? \ManagerCore\Services\PricingService::FALLBACK_DEFAULT);
+                            $fallbackOptions = [
+                                'fuzzwork' => 'Fuzzwork',
+                                'esi' => 'MCPraisal (ESI)',
+                                'janice' => empty($settings['janice_api_key']) ? 'Janice (needs the API key above)' : 'Janice',
+                                'goonpraisal' => 'Goonpraisal (Jita, Amarr and Dodixie only)',
+                                'none' => 'None: keep the cached prices',
+                            ];
+                        @endphp
+                        <div class="form-group">
+                            <label for="fallback_provider">Fallback Provider</label>
+                            <select class="form-control @error('fallback_provider') is-invalid @enderror"
+                                    id="fallback_provider" name="fallback_provider">
+                                @foreach($fallbackOptions as $fallbackValue => $fallbackLabel)
+                                <option value="{{ $fallbackValue }}" {{ $fallbackChoice === $fallbackValue ? 'selected' : '' }}>{{ $fallbackLabel }}</option>
+                                @endforeach
+                            </select>
+                            <small class="form-text text-muted">
+                                Asked for the same market when a hub market's provider, or a plugin's provider override, fails outright: every request fails, or the answer has no prices at all. When the choice is that market's own provider, or can't price the market, Fuzzwork or MCPraisal is asked instead.
+                                A citadel market never borrows a hub's prices: one read through ESI asks Goonpraisal when Goonpraisal tracks its system, and a Goonpraisal market reads a structure in the same system that another of your markets reads through ESI.
+                                Whatever the fallback can't price keeps its cached price, and SeAT's prices never stand in. The market's row on the <a href="{{ route('manager-core.markets.index') }}">Markets page</a> says what failed and what stood in. None turns all of this off.
+                            </small>
+                            @error('fallback_provider')
                             <div class="invalid-feedback">{{ $message }}</div>
                             @enderror
                         </div>

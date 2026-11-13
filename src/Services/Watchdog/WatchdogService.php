@@ -305,10 +305,11 @@ class WatchdogService
                     'label' => 'Provider unavailable (sample)',
                     'alert' => [
                         'title' => 'Price provider unavailable (sample)',
-                        'message' => "SAMPLE: Configured but unavailable on enabled markets: janice. Check credentials at MC → Settings (Janice key, Goonpraisal email, SeAT sub-provider chain). See Diagnostics → Price Providers for live test buttons.",
+                        'message' => "SAMPLE: Configured but unavailable: janice: Janice refused the request with HTTP 401 (check the API key), since 2026-10-30 14:00 UTC. Last refresh failed: c-j6mt-keepstar (MCPraisal: No character to read this structure with. Goonpraisal priced 212 of 230 type(s) meanwhile.). Prices those providers should fetch come from the fallback provider or keep their cached value meanwhile. Check credentials at MC → Settings (Janice key, Goonpraisal email, SeAT sub-provider chain) and each market's status on the Markets page. See Diagnostics → Price Providers for live test buttons.",
                         'severity' => 'warning',
                         'context' => [
-                            'unavailable_providers' => 'janice',
+                            'unavailable_providers' => 'janice: Janice refused the request with HTTP 401 (check the API key), since 2026-10-30 14:00 UTC',
+                            'failing_markets' => 'c-j6mt-keepstar (MCPraisal: No character to read this structure with. Goonpraisal priced 212 of 230 type(s) meanwhile.)',
                             'providers_in_use' => 'fuzzwork, janice, goonpraisal',
                             'note' => 'SAMPLE — not a real condition',
                         ],
@@ -508,7 +509,11 @@ class WatchdogService
      */
     protected function buildDiscordPayload(WatchdogCheck $check, array $alert): array
     {
-        $color = ($alert['severity'] ?? 'warning') === 'critical' ? 0xff5252 : 0xffc107;
+        $color = match ($alert['severity'] ?? 'warning') {
+            'critical' => 0xff5252,
+            'resolved' => 0x1cc88a,
+            default => 0xffc107,
+        };
         $fields = [];
         foreach ($alert['context'] ?? [] as $k => $v) {
             $fields[] = [
@@ -544,7 +549,11 @@ class WatchdogService
      */
     protected function buildSlackPayload(WatchdogCheck $check, array $alert): array
     {
-        $color = ($alert['severity'] ?? 'warning') === 'critical' ? 'danger' : 'warning';
+        $color = match ($alert['severity'] ?? 'warning') {
+            'critical' => 'danger',
+            'resolved' => 'good',
+            default => 'warning',
+        };
         $fields = [];
         foreach ($alert['context'] ?? [] as $k => $v) {
             $fields[] = [

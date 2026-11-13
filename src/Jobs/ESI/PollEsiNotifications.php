@@ -8,10 +8,13 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use ManagerCore\Models\ESI\EsiKeyHolder;
 use ManagerCore\Models\ESI\EsiNotification;
+use ManagerCore\Models\ESI\EsiNotificationDelivery;
 use ManagerCore\Models\WorkerRegistrySnapshot;
 use ManagerCore\Services\ESI\EsiNotificationRegistry;
+use ManagerCore\Services\ESI\NotificationAge;
 use Seat\Services\Contracts\EsiClient;
 use Seat\Eveapi\Models\RefreshToken;
 use Carbon\Carbon;
@@ -28,11 +31,17 @@ use Symfony\Component\Yaml\Yaml;
  * time drops to ~2 minutes — a 10-15x speed improvement over SeAT's default.
  *
  * Flow:
- * 1. Get next 2 key holders from the round-robin pool
+ * 1. Get the next batch of key holders from the round-robin pool
  * 2. Call ESI via Eseye for each
- * 3. Dedup against manager_core_esi_notifications by CCP's notification_id
- * 4. For new notifications: route through EsiNotificationRegistry to subscribed plugins
- * 5. Mark dispatched in the shared table
+ * 3. Store what manager_core_esi_notifications doesn't hold yet (deduped by
+ *    CCP's notification_id), up to two weeks old
+ * 4. For every undispatched row, ours and the sweep's: hand it to each
+ *    subscribed handler it isn't too old for, and record what became of it
+ *    at each one
+ * 5. Mark dispatched in the shared table once a handler got it
+ *
+ * Steps 4 and 5 run even when the pool is empty. SweepSeatNotifications only
+ * stores, so this job is what delivers its rows. NotificationAge has the ages.
  */
 class PollEsiNotifications implements ShouldQueue
 {
@@ -41,12 +50,6 @@ class PollEsiNotifications implements ShouldQueue
     public $timeout = 300;
     public $tries = 3;
     public $backoff = [60, 300, 900];
-
-    /**
-     * Skip notifications older than this many hours — stale notifications
-     * have already been handled (or aren't actionable anymore).
-     */
-    const STALE_HOURS = 2;
 
     /**
      * Adaptive-batch sizing constants. The formula targets one poll per
@@ -91,8 +94,8 @@ class PollEsiNotifications implements ShouldQueue
         // Snapshot the worker's in-memory registry state at job start. Even
         // if we exit early below (empty registry, empty pool), we still
         // record what the worker saw so the bridge dashboard surfaces the
-        // problem. The 2026-05-11 session burned hours hunting this exact
-        // state-invisibility issue — now operators see it directly.
+        // problem: the registry lives in the worker's memory, and nothing a
+        // web request can read would show it otherwise.
         $registeredTypes = $registry->getRegisteredTypes();
         $totalKeyHolders = EsiKeyHolder::where('enabled', true)->count();
         $this->writeSnapshot($registry, count($registeredTypes), $totalKeyHolders);
@@ -115,6 +118,15 @@ class PollEsiNotifications implements ShouldQueue
 
         if ($keyHolders->isEmpty()) {
             Log::debug('PollEsiNotifications: No enabled key holders to poll (add directors or all suspended)');
+
+            // The sweep stores what it finds in SeAT's table and leaves the
+            // dispatching to this job, so with nobody to poll that still has
+            // to go out from here.
+            $dispatchedCount = $this->dispatchUndispatched($registry);
+            if ($dispatchedCount > 0) {
+                Log::info("PollEsiNotifications: Dispatched {$dispatchedCount} waiting notification(s) with no key holders to poll");
+            }
+
             return;
         }
 
@@ -124,16 +136,17 @@ class PollEsiNotifications implements ShouldQueue
         $newCount = 0;
         $successCount = 0;
         $failCount = 0;
+        $intakeCutoff = NotificationAge::intakeCutoff(Carbon::now()->getTimestamp(), EsiNotification::archiveSince());
 
         foreach ($keyHolders as $keyHolder) {
             try {
-                $newCount += $this->pollKeyHolder($keyHolder, $registeredTypes);
+                $newCount += $this->pollKeyHolder($keyHolder, $registeredTypes, $intakeCutoff);
                 $successCount++;
             } catch (\Throwable $e) {
                 $failCount++;
                 [$category, $status] = self::categorizeFailure($e);
                 $keyHolder->recordFailure($status, $e->getMessage(), $category);
-                Log::warning("PollEsiNotifications: Failed to poll key holder {$keyHolder->character_id} (cat={$category}): " . $e->getMessage());
+                Log::warning("PollEsiNotifications: Failed to poll key holder " . self::holderLabel($keyHolder) . " (cat={$category}): " . $e->getMessage());
             }
         }
 
@@ -243,9 +256,10 @@ class PollEsiNotifications implements ShouldQueue
     /**
      * Poll a single key holder's notifications from ESI.
      *
+     * @param int $intakeCutoff Unix time; anything CCP sent before it isn't stored
      * @return int Number of new notifications found
      */
-    private function pollKeyHolder(EsiKeyHolder $keyHolder, array $registeredTypes): int
+    private function pollKeyHolder(EsiKeyHolder $keyHolder, array $registeredTypes, int $intakeCutoff): int
     {
         $characterId = $keyHolder->character_id;
         $corporationId = $keyHolder->corporation_id;
@@ -260,6 +274,7 @@ class PollEsiNotifications implements ShouldQueue
                 'No refresh token found in SeAT',
                 EsiKeyHolder::CATEGORY_TERMINAL_AUTH
             );
+            Log::warning('PollEsiNotifications: Failed to poll key holder ' . self::holderLabel($keyHolder) . ': no refresh token in SeAT');
             return 0;
         }
 
@@ -276,6 +291,7 @@ class PollEsiNotifications implements ShouldQueue
                 'Missing esi-characters.read_notifications.v1 scope',
                 EsiKeyHolder::CATEGORY_SCOPE_MISSING
             );
+            Log::warning('PollEsiNotifications: Failed to poll key holder ' . self::holderLabel($keyHolder) . ': token is missing the esi-characters.read_notifications.v1 scope');
             return 0;
         }
 
@@ -295,7 +311,7 @@ class PollEsiNotifications implements ShouldQueue
             $token->expires_on = $updatedAuth->getExpiresOn();
             $token->save();
         } catch (\Throwable $e) {
-            Log::debug("PollEsiNotifications: Could not update token for {$characterId}: " . $e->getMessage());
+            Log::debug("PollEsiNotifications: Could not update token for " . self::holderLabel($keyHolder) . ": " . $e->getMessage());
         }
 
         $notifications = $response->getBody();
@@ -304,6 +320,7 @@ class PollEsiNotifications implements ShouldQueue
         }
 
         $newCount = 0;
+        $wanted = [];
 
         foreach ($notifications as $notification) {
             $type = $notification->type ?? null;
@@ -319,16 +336,27 @@ class PollEsiNotifications implements ShouldQueue
                 continue;
             }
 
-            // Skip stale notifications
             $timestamp = Carbon::parse($notification->timestamp ?? 'now');
-            if ($timestamp->lt(Carbon::now()->subHours(self::STALE_HOURS))) {
+            if ($timestamp->getTimestamp() < $intakeCutoff) {
                 continue;
             }
 
-            // Dedup check
-            if (EsiNotification::notificationExists((int) $notificationId)) {
+            $wanted[(int) $notificationId] = [$notification, $timestamp];
+        }
+
+        // Two weeks of a director's notifications are mostly ones already
+        // held, so one query finds those instead of one per notification.
+        $held = empty($wanted) ? [] : array_flip(array_map(
+            'intval',
+            EsiNotification::whereIn('notification_id', array_keys($wanted))->pluck('notification_id')->all()
+        ));
+
+        foreach ($wanted as $notificationId => [$notification, $timestamp]) {
+            if (isset($held[$notificationId])) {
                 continue;
             }
+
+            $type = $notification->type;
 
             // Parse YAML text
             $rawText = $notification->text ?? '';
@@ -356,7 +384,9 @@ class PollEsiNotifications implements ShouldQueue
                     'dispatched' => false,
                 ]);
                 $newCount++;
-                Log::info("PollEsiNotifications: New {$type} #{$notificationId} from key holder {$keyHolder->character_name}");
+                $late = Carbon::now()->getTimestamp() - $timestamp->getTimestamp();
+                Log::info("PollEsiNotifications: New {$type} #{$notificationId} from key holder {$keyHolder->character_name}"
+                    . ($late > NotificationAge::DEFAULT_HOURS * 3600 ? sprintf(', sent %.1f h ago', $late / 3600) : ''));
             } catch (\Illuminate\Database\QueryException $e) {
                 if (str_contains($e->getMessage(), 'Duplicate entry') || str_contains($e->getMessage(), 'UNIQUE constraint')) {
                     continue;
@@ -374,27 +404,93 @@ class PollEsiNotifications implements ShouldQueue
      * Dispatch undispatched notifications to registered handlers.
      * Uses DB transaction with lockForUpdate to prevent concurrent jobs from
      * double-dispatching the same notifications.
+     *
+     * Each handler gets a notification only while it is no older than that
+     * handler takes (NotificationAge::isDue), so one ESI served late can reach
+     * a plugin that still has a use for it and not one whose alert would be
+     * hours out of date. What became of it at each handler is recorded.
      */
     private function dispatchUndispatched(EsiNotificationRegistry $registry): int
     {
+        $registeredTypes = $registry->getRegisteredTypes();
+        if (empty($registeredTypes)) {
+            return 0;
+        }
+
+        $clock = Carbon::now();
+        $now = $clock->getTimestamp();
+        $since = EsiNotification::archiveSince();
+        $cutoff = $clock->copy()->subSeconds($now - NotificationAge::dispatchCutoff($now, $since, $registry->getLongestMaxAgeHours()));
+
+        // The delivery table comes with this code's migration, and a worker
+        // can pick the code up before the migration has run.
+        $recording = Schema::hasTable(EsiNotificationDelivery::TABLE);
+        if (!$recording) {
+            Log::warning('PollEsiNotifications: ' . EsiNotificationDelivery::TABLE . ' is missing, so outcomes are not recorded until migrations run');
+        }
+
         $dispatched = 0;
 
-        DB::transaction(function () use (&$dispatched, $registry) {
-            $undispatched = EsiNotification::where('dispatched', false)
-                ->orderBy('timestamp', 'asc')
+        DB::transaction(function () use (&$dispatched, $registry, $registeredTypes, $now, $since, $cutoff, $recording) {
+            $query = EsiNotification::where('dispatched', false)
+                ->where('timestamp', '>=', $cutoff)
+                ->whereIn('type', $registeredTypes);
+
+            // One that was too old for every handler stays undispatched, so a
+            // plugin reading `dispatched` doesn't count it as handed over. Its
+            // delivery rows are what keep it from being picked up again.
+            if ($recording) {
+                $query->whereNotExists(function ($recorded) {
+                    $recorded->select(DB::raw(1))
+                        ->from(EsiNotificationDelivery::TABLE . ' as d')
+                        ->whereColumn('d.notification_id', 'manager_core_esi_notifications.notification_id');
+                });
+            }
+
+            $undispatched = $query->orderBy('timestamp', 'asc')
                 ->limit(50)
                 ->lockForUpdate()
                 ->get();
 
-            if ($undispatched->isEmpty()) {
-                return;
-            }
-
             foreach ($undispatched as $notification) {
                 try {
-                    $registry->dispatch($notification);
-                    $notification->markDispatched();
-                    $dispatched++;
+                    $sentAt = Carbon::parse($notification->timestamp)->getTimestamp();
+                    $storedAt = Carbon::parse($notification->created_at ?? $notification->timestamp)->getTimestamp();
+                    $handedOver = false;
+                    $outcomes = [];
+
+                    foreach ($registry->getHandlerEntriesForType($notification->type) as $entry) {
+                        $hours = $entry['max_age_hours'] ?? NotificationAge::hoursFor($notification->type);
+                        $tooOld = NotificationAge::whyNotDue($sentAt, $storedAt, $now, $since, $hours);
+
+                        if ($tooOld === null) {
+                            [$status, $detail] = $registry->deliver($notification, $entry);
+                            $handedOver = true;
+                        } else {
+                            [$status, $detail] = [EsiNotificationDelivery::TOO_OLD, $tooOld];
+                        }
+
+                        $outcomes[] = [
+                            'notification_id' => $notification->notification_id,
+                            'handler' => $entry['class'],
+                            'plugin' => $entry['plugin'],
+                            'status' => $status,
+                            'detail' => $detail,
+                            'created_at' => Carbon::now(),
+                            'updated_at' => Carbon::now(),
+                        ];
+                    }
+
+                    if ($recording && !empty($outcomes)) {
+                        DB::table(EsiNotificationDelivery::TABLE)->insertOrIgnore($outcomes);
+                    }
+
+                    // Without the table nothing else keeps it from being picked
+                    // up again, so it's marked as before.
+                    if ($handedOver || !$recording) {
+                        $notification->markDispatched();
+                        $dispatched++;
+                    }
                 } catch (\Throwable $e) {
                     Log::error("PollEsiNotifications: Failed to dispatch notification #{$notification->notification_id}: " . $e->getMessage());
                 }
@@ -402,6 +498,17 @@ class PollEsiNotifications implements ShouldQueue
         });
 
         return $dispatched;
+    }
+
+    /**
+     * A key holder as the log names it: the character's name with the id,
+     * or the id alone for a row imported without a name.
+     */
+    private static function holderLabel(EsiKeyHolder $keyHolder): string
+    {
+        $name = trim((string) $keyHolder->character_name);
+
+        return $name !== '' ? "{$name} ({$keyHolder->character_id})" : (string) $keyHolder->character_id;
     }
 
     /**

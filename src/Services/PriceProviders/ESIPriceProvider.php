@@ -57,7 +57,20 @@ class ESIPriceProvider implements PriceProviderInterface
         // Build return value by reading back from the cache. Required for
         // the Option B override path (2026-05-29) which expects a populated
         // [type_id => [buy, sell]] map per the PriceProviderInterface contract.
+        // A type the fetch failed for, or one with no orders now, comes back
+        // at its cached price too, so lastFreshTypeIds(), not this map, says
+        // what is fresh.
         return $this->readFromCache($typeIds, $market);
+    }
+
+    public function lastFetchFailures(): array
+    {
+        return $this->marketDataService->lastFetchFailures();
+    }
+
+    public function lastFreshTypeIds(): ?array
+    {
+        return $this->marketDataService->lastFreshTypeIds();
     }
 
     /**

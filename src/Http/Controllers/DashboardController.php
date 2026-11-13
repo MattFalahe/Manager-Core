@@ -26,7 +26,8 @@ class DashboardController extends Controller
             // reflects what the operator has set up rather than what the
             // scheduled cron is currently polling.
             'markets' => array_keys(\ManagerCore\Models\Market::getEffectiveMarkets(false)),
-            'plugins' => $bridge->getPlugins(),
+            // The bridge also lists suite plugins that are not installed.
+            'plugins' => array_filter($bridge->getPlugins(), fn ($plugin) => !empty($plugin['installed'])),
         ];
 
         return view('manager-core::dashboard.index', compact('statistics'));

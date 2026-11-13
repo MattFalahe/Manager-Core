@@ -43,6 +43,34 @@ class PricingPreference extends Model
     public const PRICE_TYPES = ['sell', 'buy', 'avg'];
 
     /**
+     * Other names plugins use for the midpoint of buy and sell. Mining
+     * Manager registers its preference as 'average'.
+     */
+    public const PRICE_TYPE_ALIASES = ['average' => 'avg', 'split' => 'avg'];
+
+    public static function normalisePriceType(string $priceType): string
+    {
+        $type = strtolower(trim($priceType));
+
+        return self::PRICE_TYPE_ALIASES[$type] ?? $type;
+    }
+
+    /**
+     * A row saved under another name for the midpoint reads as 'avg', so
+     * the preferences page selects it and priceForPlugin prices it, rather
+     * than the page showing Sell and the price coming back empty.
+     */
+    public function getPriceTypeAttribute($value): ?string
+    {
+        return $value === null ? null : self::normalisePriceType((string) $value);
+    }
+
+    public function setPriceTypeAttribute($value): void
+    {
+        $this->attributes['price_type'] = $value === null ? null : self::normalisePriceType((string) $value);
+    }
+
+    /**
      * Allowed provider overrides. Mirror of PricingService::getPriceProvider
      * switch arms + MarketsController::VALID_PROVIDERS. Empty string /
      * null means "use the market's configured provider".

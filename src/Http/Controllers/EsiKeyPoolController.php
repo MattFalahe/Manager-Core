@@ -3,6 +3,7 @@
 namespace ManagerCore\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Seat\Web\Http\Controllers\Controller;
 use ManagerCore\Jobs\ESI\PollEsiNotifications;
@@ -75,8 +76,15 @@ class EsiKeyPoolController extends Controller
     {
         $keyHolders = EsiKeyHolder::orderBy('corporation_id')
             ->orderBy('character_name')
-            ->get()
-            ->map(function ($kh) {
+            ->get();
+
+        $corporationNames = DB::table('corporation_infos')
+            ->whereIn('corporation_id', $keyHolders->pluck('corporation_id')->unique()->all())
+            ->pluck('name', 'corporation_id');
+
+        $keyHolders = $keyHolders
+            ->map(function ($kh) use ($corporationNames) {
+                $kh->corporation_name = $corporationNames[$kh->corporation_id] ?? null;
                 $kh->health_status = $kh->getHealthStatus();
                 $kh->health_badge = $kh->getHealthBadgeClass();
                 $kh->has_scope = $kh->hasNotificationScope();

@@ -29,10 +29,8 @@
         min-width: 0;
     }
 
-    /* Green upgrade-highlights box used by the "What's New in vX.Y.Z" section
-       that sits right under the creator note. Mirrors SM's .whats-new-box
-       (suite-wide convention — same green-gradient, same border-left, same
-       heading color) so the page feels consistent with the other plugins. */
+    /* "What's New in v1" under the creator note: the picture of the whole
+       major version, in the green box every plugin in the suite uses. */
     .whats-new-box {
         background: linear-gradient(135deg, rgba(40, 167, 69, 0.15) 0%, rgba(32, 201, 151, 0.1) 100%);
         border-left: 4px solid #28a745;
@@ -59,12 +57,141 @@
         margin-bottom: 6px;
         color: #d1d5db !important;
     }
-    .whats-new-box code {
+    .whats-new-box code,
+    .recent-changes-box code {
         background: rgba(0, 0, 0, 0.3);
         color: #fbbf24 !important;
         padding: 1px 5px;
         border-radius: 3px;
         font-size: 0.88rem;
+    }
+
+    /* What the latest release changed that an operator can see, under the
+       What's New box. */
+    .recent-changes-box {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.1) 100%);
+        border-left: 4px solid #667eea;
+        border-radius: 8px;
+        padding: 15px 20px;
+        margin: 20px 0;
+        color: #d1d5db !important;
+    }
+    .recent-changes-box h4 {
+        color: #8b9cf7 !important;
+        margin-top: 0;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .recent-changes-box h5 {
+        color: #c7d2fe !important;
+        font-size: 0.95rem;
+        margin: 14px 0 6px;
+    }
+    .recent-changes-box ul {
+        margin: 6px 0;
+        padding-left: 20px;
+    }
+    .recent-changes-box li {
+        margin-bottom: 6px;
+        color: #d1d5db !important;
+    }
+    .recent-changes-box a {
+        color: #a5b4fc !important;
+        text-decoration: underline;
+    }
+
+    /* The What's New pill carries the major version's name, the Recent
+       changes pill the latest release's. When a heading and its pill don't
+       fit on one row, the pill moves under the heading instead of squeezing
+       it or running out of the box. */
+    .whats-new-box h4,
+    .recent-changes-box h4 {
+        flex-wrap: wrap;
+        justify-content: space-between;
+        row-gap: 8px;
+    }
+    .whats-new-tag,
+    .recent-changes-tag {
+        font-size: 0.6em;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        border-radius: 20px;
+        padding: 3px 12px;
+        white-space: normal;
+    }
+    .whats-new-tag {
+        color: #b7f7c8 !important;
+        background: rgba(40, 167, 69, 0.22);
+        border: 1px solid rgba(81, 207, 102, 0.4);
+    }
+    .recent-changes-tag {
+        color: #c7d2fe !important;
+        background: rgba(102, 126, 234, 0.22);
+        border: 1px solid rgba(139, 156, 247, 0.4);
+    }
+
+    /* Marks what the latest release adds. */
+    .new-badge {
+        display: inline-block;
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: #fff !important;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        padding: 2px 8px;
+        border-radius: 10px;
+        margin-left: 6px;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+
+    /* Plugins & Ecosystem: one card per plugin that uses Manager Core. */
+    .eco-plugin {
+        background: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(102, 126, 234, 0.25);
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 12px;
+    }
+    .eco-plugin-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+    .eco-plugin-head > i {
+        color: #667eea;
+        width: 20px;
+        text-align: center;
+    }
+    .eco-plugin-head strong {
+        font-size: 1.05rem;
+        color: #e2e8f0;
+    }
+    .eco-badges {
+        margin-left: auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .eco-badges .badge {
+        font-size: 0.8rem;
+    }
+    .eco-plugin p {
+        margin-bottom: 6px;
+    }
+    .eco-link {
+        color: #8b9cf7 !important;
+        font-size: 0.9rem;
+    }
+    .help-card p.eco-group-line {
+        color: #9ca3af !important;
+        margin-top: 12px;
+        margin-bottom: 0;
     }
 
     /* Red banner used by the "A note from the author" section that warns
@@ -141,6 +268,9 @@
 @endpush
 
 @section('full')
+@php
+    $newBadge = '<span class="new-badge">' . e(trans('manager-core::help.new_badge')) . '</span>';
+@endphp
 <div class="manager-core-wrapper help-page">
 
     <div class="help-wrapper">
@@ -421,22 +551,25 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <div class="signature">{{ trans('manager-core::help.creator_note_signature') }}</div>
                 </div>
 
-                {{-- What's New in v1.0.2 — upgrade highlights box. Sits under
-                     the creator note so operators upgrading from v1.0.1 land
-                     on the delta-from-the-previous-release callout before
-                     diving into the broader plugin description below. Uses
-                     the suite-wide .whats-new-box style (mirrors SM/MM). --}}
+                {{-- What's New in v1 is the picture of the whole major version,
+                     so it never names a point release. What a later release
+                     changes goes in the Recent changes box underneath, and the
+                     changelog keeps the full record. --}}
                 <div class="whats-new-box">
                     <h4>
-                        <i class="fas fa-sparkles"></i>
-                        {{ trans('manager-core::help.whats_new_v102_title') }}
+                        <span><i class="fas fa-star"></i> {{ trans('manager-core::help.whats_new_v1_title') }}</span>
+                        <span class="whats-new-tag">{{ trans('manager-core::help.whats_new_v1_name') }}</span>
                     </h4>
-                    <p>{!! trans('manager-core::help.whats_new_v102_intro') !!}</p>
-                    {!! trans('manager-core::help.whats_new_v102_list') !!}
-                    <p style="margin-top: 12px; margin-bottom: 0; font-size: 0.88rem; color: #8b95a5;">
-                        <i class="fas fa-info-circle"></i>
-                        {!! trans('manager-core::help.whats_new_v102_upgrade_note') !!}
-                    </p>
+                    <p>{!! trans('manager-core::help.whats_new_v1_intro') !!}</p>
+                    {!! trans('manager-core::help.whats_new_v1_list') !!}
+                </div>
+
+                <div class="recent-changes-box">
+                    <h4>
+                        <span><i class="fas fa-history"></i> {{ trans('manager-core::help.recent_changes_title') }}</span>
+                        <span class="recent-changes-tag">{{ trans('manager-core::help.recent_changes_name') }}</span>
+                    </h4>
+                    {!! trans('manager-core::help.recent_changes_body') !!}
                 </div>
 
                 {{-- What is Manager Core? --}}
@@ -526,7 +659,7 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                 </div>
             </div>
 
-            {{-- The Plugin Family / Ecosystem Section --}}
+            {{-- Plugins & Ecosystem Section --}}
             <div id="ecosystem" class="help-section">
                 <style>
                     #ecosystem .family-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
@@ -534,11 +667,10 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     #ecosystem .family-table td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); color: #d1d5db; vertical-align: top; font-size: 0.88rem; line-height: 1.45; }
                     #ecosystem .family-table tr:last-child td { border-bottom: none; }
                     #ecosystem .family-table td strong { color: #e2e8f0; }
-                    #ecosystem .family-table tr.is-core td { background: rgba(102, 126, 234, 0.08); }
                 </style>
 
                 <div class="help-card">
-                    <h3><i class="fas fa-sitemap"></i> The plugin family</h3>
+                    <h3><i class="fas fa-sitemap"></i> Plugins &amp; Ecosystem</h3>
                     <p>Manager Core is the optional hub of a family of SeAT plugins built to work together. Each one is genuinely useful on its own, but when Manager Core is installed they start sharing data, events and prices through it. Manager Core has no corporation features of its own; it is the wiring the others plug into.</p>
                     <div class="info-box">
                         <i class="fas fa-lightbulb"></i>
@@ -554,24 +686,78 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     @include('manager-core::partials._ecosystem_map')
                 </div>
 
+                {{-- The plugins that use Manager Core, each found the way the
+                     Plugin Bridge finds it: by its service provider class. --}}
+                @php
+                    $familyPlugins = config('manager-core.bridge.compatible_plugins', []);
+                    $familyAbout = [
+                        'mining-manager' => [
+                            'url' => 'https://github.com/MattFalahe/Mining-Manager',
+                            'text' => 'Mining tax, ledger, moon extraction monitoring and theft detection.',
+                            'here' => 'Ore prices from Manager Core\'s markets, moon notifications from the ESI Key Pool, and structure alerts. It publishes its tax, theft and extraction events.',
+                        ],
+                        'structure-manager' => [
+                            'url' => 'https://github.com/MattFalahe/Structure-Manager',
+                            'text' => 'Upwell and POS fuel, reinforcement timers, attack alerts and fuel-theft forensics.',
+                            'here' => 'Fast structure notifications from the ESI Key Pool and fuel prices from Manager Core\'s markets. It publishes structure alerts, timers and doctrine changes.',
+                        ],
+                        'corp-wallet-manager' => [
+                            'url' => 'https://github.com/MattFalahe/Corp-Wallet-Manager',
+                            'text' => 'Corporation wallet analytics and predictions.',
+                            'here' => 'Shares member contribution, ratting and tax figures with the other plugins through the Plugin Bridge, and publishes wallet and member events.',
+                        ],
+                        'seat-discord-pings' => [
+                            'url' => 'https://github.com/MattFalahe/SeAT-Discord-Pings',
+                            'text' => 'Discord broadcasts, a fleet calendar and an FC opportunities board.',
+                            'here' => 'Structure timers and moon extractions from the other plugins fill its calendar. It publishes its broadcast and form-up events.',
+                        ],
+                        'blueprint-manager' => [
+                            'url' => 'https://github.com/MattFalahe/Blueprint-Manager',
+                            'text' => 'Corporation blueprint library and copy-request workflow.',
+                            'here' => 'Publishes its request events and shares per-member and per-corporation request figures through the Plugin Bridge.',
+                        ],
+                        'hr-manager' => [
+                            'url' => 'https://github.com/MattFalahe/HR-Manager',
+                            'text' => 'Recruitment funnel and member assessment.',
+                            'here' => 'The biggest user: mining, wallet, blueprint, structure and broadcast events, and Corp Wallet, Blueprint and Structure Manager figures through the Plugin Bridge, all go into its picture of each member.',
+                        ],
+                        'buyback-manager' => [
+                            'url' => 'https://github.com/MattFalahe/Buyback-Manager',
+                            'text' => 'Corporation buyback programme: appraise, offer, contract.',
+                            'here' => 'Prices its appraisals through Manager Core and publishes its buyback events.',
+                            'unreleased' => true,
+                        ],
+                    ];
+                @endphp
                 <div class="help-card">
-                    <h3><i class="fas fa-th-large"></i> The plugins</h3>
-                    <table class="family-table">
-                        <thead>
-                            <tr><th>Plugin</th><th>What it does</th><th>How it uses Manager Core</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr class="is-core"><td><strong>Manager Core</strong></td><td>The hub. Pricing, the EventBus, the Plugin Bridge, shared SDE lookups and a shared fast-polling ESI key pool.</td><td>It <em>is</em> the hub.</td></tr>
-                            <tr><td><strong>Mining Manager</strong></td><td>Mining tax, ledger, moon extraction monitoring and theft detection.</td><td>Centralised ore pricing; publishes tax / theft / extraction events; subscribes to structure alerts.</td></tr>
-                            <tr><td><strong>Structure Manager</strong></td><td>Upwell + POS fuel, reinforcement timers, attack alerts and fuel-theft forensics.</td><td>Shared fast ESI polling; publishes structure-alert and timer events for others to react to.</td></tr>
-                            <tr><td><strong>Corp Wallet Manager</strong></td><td>Corporation wallet analytics and predictions.</td><td>Exposes member contribution / ratting / tax stats as bridge capabilities; publishes wallet signals.</td></tr>
-                            <tr><td><strong>Buyback Manager</strong></td><td>Corp buyback programme: appraise, offer, contract.</td><td>Uses Manager Core pricing for appraisals; publishes buyback lifecycle events.</td></tr>
-                            <tr><td><strong>Blueprint Manager</strong></td><td>Corporation blueprint library and copy-request workflow.</td><td>Publishes request lifecycle events; exposes per-member and per-corp request stats as capabilities.</td></tr>
-                            <tr><td><strong>HR Manager</strong></td><td>Recruitment funnel and director assessment / retention.</td><td>The biggest consumer: subscribes to mining, wallet, broadcast and blueprint events to build a per-member picture, and exposes assessment capabilities of its own.</td></tr>
-                            <tr><td><strong>SeAT Broadcast</strong></td><td>Discord broadcasts, a fleet calendar and an FC opportunities board.</td><td>Subscribes to structure timers and mining extractions to fill its calendar; publishes broadcast events.</td></tr>
-                            <tr><td><strong>Industry Manager</strong></td><td>Industry / blueprint calculator and planetary industry.</td><td>Planned: Manager Core pricing for build-vs-buy.</td></tr>
-                        </tbody>
-                    </table>
+                    <h3><i class="fas fa-th-large"></i> The plugins {!! $newBadge !!}</h3>
+                    <p>Every plugin below works on its own. Each says whether this server has it, checked when this page opens, and what it gets from Manager Core.</p>
+                    @foreach($familyPlugins as $key => $plugin)
+                        @php
+                            $about = $familyAbout[$key] ?? null;
+                            $installed = !empty($plugin['class']) && class_exists($plugin['class']);
+                            $icon = $plugin['icon'] ?? 'fa-puzzle-piece';
+                            $icon = str_starts_with($icon, 'fab ') ? $icon : 'fas ' . $icon;
+                        @endphp
+                        <div class="eco-plugin">
+                            <div class="eco-plugin-head">
+                                <i class="{{ $icon }}"></i>
+                                <strong>{{ $plugin['name'] ?? $key }}</strong>
+                                <span class="eco-badges">
+                                    @if(!empty($about['unreleased']))
+                                        <span class="badge badge-info">In preparation</span>
+                                    @endif
+                                    <span class="badge {{ $installed ? 'badge-success' : 'badge-secondary' }}">{{ $installed ? 'Installed' : 'Not installed' }}</span>
+                                </span>
+                            </div>
+                            @if($about)
+                                <p>{{ $about['text'] }}</p>
+                                <p><strong>From Manager Core:</strong> {{ $about['here'] }}</p>
+                                <a href="{{ $about['url'] }}" target="_blank" rel="noopener" class="eco-link"><i class="fab fa-github"></i> {{ $plugin['name'] ?? $key }} on GitHub</a>
+                            @endif
+                        </div>
+                    @endforeach
+                    <p class="eco-group-line">Ratting Manager and Industry Manager don't use Manager Core yet.</p>
                 </div>
 
                 <div class="help-card">
@@ -640,10 +826,9 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <h4>{{ trans('manager-core::help.update_frequency_title') }}</h4>
                     <p>{{ trans('manager-core::help.update_frequency_desc') }}</p>
 
-                    {{-- 2026-05-13: custom market support (citadels + extra hubs)
-                         shipped in MC v1.0.0. Lives at the bottom of the
-                         Pricing section so operators reading top-to-bottom hit
-                         hub-market basics first, then advanced custom markets. --}}
+                    {{-- Custom markets (citadels and extra hubs) sit at the
+                         bottom of the Pricing section so operators reading
+                         top to bottom hit hub-market basics first. --}}
                     <h4 style="margin-top:24px;">
                         <i class="fas fa-industry"></i>
                         {{ trans('manager-core::help.custom_markets_title') }}
@@ -655,9 +840,12 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <h5 style="margin-top:18px;">{{ trans('manager-core::help.custom_markets_adding_title') }}</h5>
                     {!! trans('manager-core::help.custom_markets_adding_steps') !!}
 
-                    <h5 style="margin-top:18px;">{{ trans('manager-core::help.custom_markets_health_title') }}</h5>
+                    <h5 style="margin-top:18px;">{{ trans('manager-core::help.custom_markets_health_title') }} {!! $newBadge !!}</h5>
                     {!! trans('manager-core::help.custom_markets_health_table') !!}
                     {!! trans('manager-core::help.custom_markets_pagination_note') !!}
+
+                    <h5 style="margin-top:18px;">{{ trans('manager-core::help.pricing_fallback_title') }} {!! $newBadge !!}</h5>
+                    {!! trans('manager-core::help.pricing_fallback_body') !!}
 
                     <h5 style="margin-top:18px;">{{ trans('manager-core::help.custom_markets_consume_title') }}</h5>
                     {!! trans('manager-core::help.custom_markets_consume_intro') !!}
@@ -716,6 +904,9 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         <li>{{ trans('manager-core::help.plugin_hr') }}</li>
                         <li>{{ trans('manager-core::help.plugin_buyback') }}</li>
                     </ul>
+
+                    <h4>{{ trans('manager-core::help.compatible_plugins_title') }} {!! $newBadge !!}</h4>
+                    <p>{!! trans('manager-core::help.compatible_plugins_desc') !!}</p>
                 </div>
             </div>
 
@@ -854,6 +1045,12 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <h4>{{ trans('manager-core::help.fast_poll_how_title') }}</h4>
                     {!! trans('manager-core::help.fast_poll_how_body') !!}
 
+                    <h4 style="margin-top:18px;">{{ trans('manager-core::help.fast_poll_ages_title') }} {!! $newBadge !!}</h4>
+                    {!! trans('manager-core::help.fast_poll_ages_body') !!}
+
+                    <h4 style="margin-top:18px;">{{ trans('manager-core::help.fast_poll_pool_title') }} {!! $newBadge !!}</h4>
+                    {!! trans('manager-core::help.fast_poll_pool_body') !!}
+
                     <h4 style="margin-top:18px;">{{ trans('manager-core::help.fast_poll_scale_title') }}</h4>
                     {!! trans('manager-core::help.fast_poll_scale_intro') !!}
 
@@ -929,7 +1126,7 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <h4>{{ trans('manager-core::help.watchdog_checks_title') }}</h4>
                     {!! trans('manager-core::help.watchdog_checks_body') !!}
 
-                    <h4>{{ trans('manager-core::help.watchdog_dedup_title') }}</h4>
+                    <h4>{{ trans('manager-core::help.watchdog_dedup_title') }} {!! $newBadge !!}</h4>
                     <p>{!! trans('manager-core::help.watchdog_dedup_body') !!}</p>
 
                     <h4>{{ trans('manager-core::help.watchdog_exclusion_title') }}</h4>
@@ -1005,6 +1202,30 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <div class="info-box">
                         <i class="fas fa-info-circle"></i>
                         <div><strong>Note:</strong> {!! trans('manager-core::help.cleanup_events_note') !!}</div>
+                    </div>
+
+                    <h4>{{ trans('manager-core::help.cleanup_stale_cmd_title') }}</h4>
+                    <p>{{ trans('manager-core::help.cleanup_stale_cmd_desc') }}</p>
+                    <pre><code>{{ trans('manager-core::help.cleanup_stale_cmd') }}</code></pre>
+                    <div class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <div><strong>Note:</strong> {!! trans('manager-core::help.cleanup_stale_note') !!}</div>
+                    </div>
+
+                    <h4>{{ trans('manager-core::help.poll_esi_cmd_title') }}</h4>
+                    <p>{{ trans('manager-core::help.poll_esi_cmd_desc') }}</p>
+                    <pre><code>{{ trans('manager-core::help.poll_esi_cmd') }}</code></pre>
+                    <div class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <div><strong>Note:</strong> {{ trans('manager-core::help.poll_esi_note') }}</div>
+                    </div>
+
+                    <h4>{{ trans('manager-core::help.sweep_cmd_title') }}</h4>
+                    <p>{{ trans('manager-core::help.sweep_cmd_desc') }}</p>
+                    <pre><code>{{ trans('manager-core::help.sweep_cmd') }}</code></pre>
+                    <div class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <div><strong>Note:</strong> {{ trans('manager-core::help.sweep_note') }}</div>
                     </div>
 
                     <h4>{{ trans('manager-core::help.diagnose_cmd_title') }}</h4>

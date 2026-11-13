@@ -3,6 +3,7 @@
 namespace ManagerCore\Services\ESI;
 
 use Illuminate\Support\Facades\Log;
+use ManagerCore\Models\ESI\EsiNotificationDelivery;
 
 /**
  * Plugin subscription registry for ESI notifications.
@@ -23,6 +24,17 @@ use Illuminate\Support\Facades\Log;
  * Handler contract: any class with a static `handle($notification): void` method.
  * The $notification argument is a \ManagerCore\Models\ESI\EsiNotification instance.
  *
+ * A handler gets notifications up to 2 hours old (72 for
+ * MoonminingExtractionStarted) unless it asks for something else:
+ *
+ *     ->register($types, MyHandler::class, 'my-plugin', ['max_age_hours' => 24]);
+ *     ->register($types, MyHandler::class, 'my-plugin', ['max_age_hours' => ['StructureLostShields' => 48]]);
+ *
+ * ESI sometimes serves a notification hours late. Ask for more when your
+ * plugin can still act on late news, and leave it when a late alert would
+ * only confuse people. Manager Core keeps notifications up to two weeks old,
+ * so that is the most a handler can take. See NotificationAge.
+ *
  * Registered as a singleton so all plugins contribute to the same in-memory map
  * during a single request/job lifecycle.
  */
@@ -30,7 +42,8 @@ class EsiNotificationRegistry
 {
     /**
      * Map of CCP notification type => list of handler entries.
-     * Each entry: ['class' => FQN, 'queued' => bool, 'queue' => ?string, 'plugin' => string]
+     * Each entry: ['class' => FQN, 'queued' => bool, 'queue' => ?string, 'plugin' => string,
+     *              'max_age_hours' => float]
      *
      * @var array<string, array<int, array>>
      */
@@ -67,7 +80,10 @@ class EsiNotificationRegistry
      * @param string|array $types  One or many notification type strings (e.g. 'StructureUnderAttack')
      * @param string       $handlerClass Fully-qualified class name with a static handle() method
      * @param string|null  $pluginName Optional plugin identifier for the diagnostic UI
-     * @param array        $options ['queued' => bool, 'queue' => string|null]
+     * @param array        $options ['queued' => bool, 'queue' => string|null,
+     *                               'max_age_hours' => int|float|array<string, int|float>]
+     *                     max_age_hours is one age for every type here, or ages by type;
+     *                     a type it leaves out gets NotificationAge's default for it.
      */
     public function register($types, string $handlerClass, ?string $pluginName = null, array $options = []): void
     {
@@ -115,7 +131,9 @@ class EsiNotificationRegistry
                 }
             }
             if (!$exists) {
-                $this->handlers[$type][] = $entry;
+                $this->handlers[$type][] = $entry + [
+                    'max_age_hours' => NotificationAge::hoursFor($type, $options['max_age_hours'] ?? null),
+                ];
             }
         }
 
@@ -172,10 +190,27 @@ class EsiNotificationRegistry
     }
 
     /**
+     * The longest any handler takes notifications, in hours. Dispatch never
+     * has to look further back than twice this.
+     */
+    public function getLongestMaxAgeHours(): float
+    {
+        $longest = 0.0;
+        foreach ($this->handlers as $entries) {
+            foreach ($entries as $entry) {
+                $longest = max($longest, (float) ($entry['max_age_hours'] ?? 0));
+            }
+        }
+
+        return $longest;
+    }
+
+    /**
      * Get all registrations grouped by plugin — for the diagnostic UI.
-     * Includes per-handler latency stats so operators can spot slow subscribers.
+     * Includes per-handler latency stats so operators can spot slow subscribers,
+     * and how old each type may be when it goes to the plugin.
      *
-     * @return array<string, array{types: array, handlers: array, stats: array}>
+     * @return array<string, array{types: array, handlers: array, stats: array, max_age_hours: array<string, float>}>
      */
     public function getRegistrationsByPlugin(): array
     {
@@ -184,11 +219,20 @@ class EsiNotificationRegistry
         foreach ($this->registrations as $reg) {
             $plugin = $reg['plugin'];
             if (!isset($grouped[$plugin])) {
-                $grouped[$plugin] = ['types' => [], 'handlers' => [], 'stats' => []];
+                $grouped[$plugin] = ['types' => [], 'handlers' => [], 'stats' => [], 'max_age_hours' => []];
             }
             $grouped[$plugin]['types'] = array_unique(array_merge($grouped[$plugin]['types'], $reg['types']));
             if (!in_array($reg['handler'], $grouped[$plugin]['handlers'], true)) {
                 $grouped[$plugin]['handlers'][] = $reg['handler'];
+            }
+            // The entry kept for a type is the first registration of this
+            // handler for it, so read the age from there.
+            foreach ($reg['types'] as $type) {
+                foreach ($this->handlers[$type] ?? [] as $entry) {
+                    if ($entry['class'] === $reg['handler']) {
+                        $grouped[$plugin]['max_age_hours'][$type] = $entry['max_age_hours'];
+                    }
+                }
             }
             // Attach latency stats for this handler
             if (isset($this->handlerStats[$reg['handler']])) {
@@ -216,6 +260,10 @@ class EsiNotificationRegistry
      *
      * Returns the number of handlers invoked (sync) or queued (async).
      * Errors in individual handlers are caught and logged.
+     *
+     * Every handler gets it, however old it is. Manager Core's own poll goes
+     * through deliver() instead, one handler at a time, so it can leave out a
+     * handler the notification is too old for and record each outcome.
      */
     public function dispatch($notification): int
     {
@@ -224,65 +272,78 @@ class EsiNotificationRegistry
             return 0;
         }
 
-        $entries = $this->getHandlerEntriesForType($type);
-        if (empty($entries)) {
-            return 0;
-        }
-
         $invoked = 0;
-        foreach ($entries as $entry) {
-            $handlerClass = $entry['class'];
-
-            try {
-                if (!class_exists($handlerClass)) {
-                    Log::warning("EsiNotificationRegistry: handler class {$handlerClass} does not exist (plugin uninstalled?)");
-                    continue;
-                }
-
-                if ($entry['queued']) {
-                    // Queued path — dispatch a job and return immediately
-                    $job = new \ManagerCore\Jobs\ESI\DispatchEsiNotificationJob(
-                        $handlerClass,
-                        (int) ($notification->id ?? $notification->notification_id ?? 0)
-                    );
-
-                    if (!empty($entry['queue'])) {
-                        $job->onQueue($entry['queue']);
-                    }
-
-                    dispatch($job);
-                    $invoked++;
-                    continue;
-                }
-
-                // Sync path — invoke inline and track timing
-                if (!method_exists($handlerClass, 'handle')) {
-                    Log::warning("EsiNotificationRegistry: handler {$handlerClass} has no handle() method");
-                    continue;
-                }
-
-                $start = microtime(true);
-                $handlerClass::handle($notification);
-                $elapsedMs = (int) ((microtime(true) - $start) * 1000);
-
-                $this->recordHandlerStat($handlerClass, $elapsedMs);
-
-                if ($elapsedMs >= self::SLOW_HANDLER_MS) {
-                    Log::warning("EsiNotificationRegistry: SLOW sync handler {$handlerClass} took {$elapsedMs}ms — consider queued=true", [
-                        'notification_id' => $notification->notification_id ?? null,
-                        'type' => $type,
-                    ]);
-                }
-
+        foreach ($this->getHandlerEntriesForType($type) as $entry) {
+            [$status] = $this->deliver($notification, $entry);
+            if ($status !== EsiNotificationDelivery::FAILED) {
                 $invoked++;
-            } catch (\Throwable $e) {
-                Log::error(
-                    "EsiNotificationRegistry: handler {$handlerClass} failed for notification #" . ($notification->notification_id ?? 'unknown') . ': ' . $e->getMessage()
-                );
             }
         }
 
         return $invoked;
+    }
+
+    /**
+     * Hand a notification to one handler entry. Errors are caught and logged.
+     *
+     * @return array{0: string, 1: ?string} the EsiNotificationDelivery status,
+     *                                      and why when it failed
+     */
+    public function deliver($notification, array $entry): array
+    {
+        $handlerClass = $entry['class'];
+
+        try {
+            if (!class_exists($handlerClass)) {
+                Log::warning("EsiNotificationRegistry: handler class {$handlerClass} does not exist (plugin uninstalled?)");
+
+                return [EsiNotificationDelivery::FAILED, 'The handler class does not exist.'];
+            }
+
+            if ($entry['queued']) {
+                // Queued path — dispatch a job and return immediately
+                $job = new \ManagerCore\Jobs\ESI\DispatchEsiNotificationJob(
+                    $handlerClass,
+                    (int) ($notification->id ?? $notification->notification_id ?? 0)
+                );
+
+                if (!empty($entry['queue'])) {
+                    $job->onQueue($entry['queue']);
+                }
+
+                dispatch($job);
+
+                return [EsiNotificationDelivery::QUEUED, null];
+            }
+
+            // Sync path — invoke inline and track timing
+            if (!method_exists($handlerClass, 'handle')) {
+                Log::warning("EsiNotificationRegistry: handler {$handlerClass} has no handle() method");
+
+                return [EsiNotificationDelivery::FAILED, 'The handler has no handle() method.'];
+            }
+
+            $start = microtime(true);
+            $handlerClass::handle($notification);
+            $elapsedMs = (int) ((microtime(true) - $start) * 1000);
+
+            $this->recordHandlerStat($handlerClass, $elapsedMs);
+
+            if ($elapsedMs >= self::SLOW_HANDLER_MS) {
+                Log::warning("EsiNotificationRegistry: SLOW sync handler {$handlerClass} took {$elapsedMs}ms — consider queued=true", [
+                    'notification_id' => $notification->notification_id ?? null,
+                    'type' => $notification->type ?? null,
+                ]);
+            }
+
+            return [EsiNotificationDelivery::HANDLED, null];
+        } catch (\Throwable $e) {
+            Log::error(
+                "EsiNotificationRegistry: handler {$handlerClass} failed for notification #" . ($notification->notification_id ?? 'unknown') . ': ' . $e->getMessage()
+            );
+
+            return [EsiNotificationDelivery::FAILED, mb_substr($e->getMessage(), 0, 255)];
+        }
     }
 
     /**

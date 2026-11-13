@@ -34,6 +34,15 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
     protected $plugins = [];
 
     /**
+     * Plugins from outside the suite that announced themselves with
+     * registerSelf(). Kept apart from $plugins so the ecosystem map, the
+     * Plugin Registry table and getStatistics() still describe the suite.
+     *
+     * @var array
+     */
+    protected $externalPlugins = [];
+
+    /**
      * Plugin capabilities registry
      *
      * @var array
@@ -41,14 +50,25 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
     protected $capabilities = [];
 
     /**
-     * Pending capability list for plugins not yet in registry (boot-order safety)
+     * Capability names waiting to be stored on their plugin's registry row,
+     * [pluginName => [capability1, capability2, ...]].
      *
-     * Holds [pluginName => [capability1, capability2, ...]] until updateRegistry
-     * either creates the row or finds it. Flushed on every registerCapability call.
+     * Every plugin registers its capabilities while it boots, so in every
+     * process: each page load, each scheduled command, each queue worker.
+     * They are stored once the boot is over, in one query for all plugins,
+     * rather than a lookup per capability. A plugin with no row yet keeps its
+     * names here until discover() makes the row.
      *
      * @var array<string, array<string>>
      */
     protected $pendingCapabilities = [];
+
+    /**
+     * Whether storing the pending names is already waiting for the boot to end.
+     *
+     * @var bool
+     */
+    protected $flushScheduled = false;
 
     /**
      * Last error from a call() that returned null
@@ -61,6 +81,14 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
      * Cache key for plugin discovery
      */
     const CACHE_KEY = 'mc_plugin_bridge_registry';
+
+    /**
+     * The name Manager Core registers its own capabilities under. The
+     * registry lists the plugins around Manager Core and has no row for it,
+     * so these are never stored there: wherever Manager Core runs, they are
+     * in memory.
+     */
+    const SELF_KEY = 'ManagerCore';
 
     /**
      * Discover and register all compatible plugins
@@ -111,18 +139,29 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         }
         Cache::put(self::CACHE_KEY . ':signature', $signature, ($cacheDuration * 60) * 24);
 
-        $this->plugins = Cache::remember(self::CACHE_KEY, $cacheDuration * 60, function () {
+        $discovered = Cache::remember(self::CACHE_KEY, $cacheDuration * 60, function () {
             return $this->scanForPlugins();
         });
 
-        // Always flush pending capabilities for any plugin that appeared
-        foreach (array_keys($this->plugins) as $pluginKey) {
-            if (!empty($this->pendingCapabilities[$pluginKey])) {
-                $this->flushPendingCapabilities($pluginKey);
+        // One scan covers both lists. Outside plugins carry 'external' => true.
+        $this->plugins = [];
+        $this->externalPlugins = [];
+        foreach ($discovered as $pluginKey => $plugin) {
+            if (!empty($plugin['external'])) {
+                $this->externalPlugins[$pluginKey] = $plugin;
+            } else {
+                $this->plugins[$pluginKey] = $plugin;
             }
         }
 
-        Log::debug('[Manager Core] Plugin Bridge discovered ' . count($this->plugins) . ' plugins');
+        // Store the names of any plugin whose row the scan just made. While
+        // the app is booting this waits for the boot to end, with the rest.
+        if (!empty($this->pendingCapabilities)) {
+            $this->scheduleCapabilityFlush();
+        }
+
+        Log::debug('[Manager Core] Plugin Bridge discovered ' . count($this->plugins) . ' plugins and '
+            . count($this->externalPlugins) . ' from outside the suite');
     }
 
     /**
@@ -134,6 +173,10 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
     {
         $discoveredPlugins = [];
         $compatiblePlugins = config('manager-core.bridge.compatible_plugins', []);
+
+        // Plugins from outside the suite, from the rows registerSelf() wrote.
+        // They go through the same signals and states as the suite.
+        $externalPlugins = $this->getSelfRegisteredPlugins($compatiblePlugins);
 
         // Pricing-type subscriptions
         $activeSubscriptions = $this->getActivePricingSubscriptionCounts();
@@ -165,7 +208,8 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         $errorCounts  = $this->getSubscriberErrorCounts(60);
         $openCircuits = $this->getOpenCircuitCounts();
 
-        foreach ($compatiblePlugins as $pluginKey => $pluginConfig) {
+        foreach ($compatiblePlugins + $externalPlugins as $pluginKey => $pluginConfig) {
+            $external = isset($externalPlugins[$pluginKey]);
             $providerClass = $pluginConfig['class'] ?? null;
             $subscriptionName = $pluginConfig['subscription_name'] ?? null;
 
@@ -246,11 +290,17 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
                 // if the plugin has never published or received an event.
                 'last_published_at' => $lastPublishedAt[$pluginKey] ?? null,
                 'last_received_at'  => $lastReceivedAt[$pluginKey] ?? null,
+                'subscription_name' => $subscriptionName,
+                'external' => $external,
             ];
 
             // Update database registry
             if ($installed) {
-                $this->updateRegistry($pluginKey, $providerClass, $status, $integrationCount, $state);
+                // An outside plugin's row holds the name, package and icon it
+                // registered with, which updateRegistry() would overwrite.
+                if (!$external) {
+                    $this->updateRegistry($pluginKey, $providerClass, $status, $integrationCount, $state);
+                }
 
                 // Now that the registry row exists, flush any buffered capabilities
                 $this->flushPendingCapabilities($pluginKey);
@@ -263,6 +313,53 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         }
 
         return $discoveredPlugins;
+    }
+
+    /**
+     * Registry rows that registerSelf() wrote for plugins outside the suite,
+     * shaped like compatible_plugins entries so scanForPlugins() can treat
+     * both the same way.
+     *
+     * A row is left out when the plugin is part of the suite, when its class
+     * no longer loads (the plugin was removed), when the cleanup command has
+     * deactivated it, or when its key isn't a plain slug. The key ends up in
+     * URLs and element ids.
+     *
+     * @param array $compatiblePlugins
+     * @return array [plugin_key => ['name', 'class', 'package', 'icon', 'subscription_name']]
+     */
+    protected function getSelfRegisteredPlugins(array $compatiblePlugins): array
+    {
+        try {
+            $rows = PluginRegistry::where('is_active', true)->orderBy('plugin_name')->get();
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        $plugins = [];
+        foreach ($rows as $row) {
+            $key = (string) $row->plugin_name;
+            $meta = is_array($row->metadata) ? $row->metadata : [];
+
+            if (empty($meta['self_registered'])
+                || isset($compatiblePlugins[$key])
+                || $key === 'manager-core'
+                || !preg_match('/^[a-z0-9][a-z0-9_.-]*$/', $key)
+                || !$row->plugin_class
+                || !class_exists($row->plugin_class)) {
+                continue;
+            }
+
+            $plugins[$key] = [
+                'name' => (string) ($meta['name'] ?? $key),
+                'class' => $row->plugin_class,
+                'package' => (string) ($meta['package'] ?? $key),
+                'icon' => (string) ($meta['icon'] ?? 'fa-puzzle-piece'),
+                'subscription_name' => $meta['subscription_name'] ?? null,
+            ];
+        }
+
+        return $plugins;
     }
 
     /**
@@ -759,7 +856,8 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
      * M10: Self-register a plugin with the bridge at runtime.
      *
      * Plugins NOT listed in the hardcoded compatible_plugins config can call
-     * this from their service-provider boot() to appear in the bridge UI.
+     * this from their service-provider boot() to appear in the bridge UI,
+     * under Compatible Plugins on the Plugin Bridge page and in Diagnostics.
      * The plugin's package, name, icon, and provider class are persisted to
      * PluginRegistry so the discover() pass picks them up on the next scan.
      *
@@ -820,23 +918,36 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
             ];
         }
 
+        $values = [
+            'plugin_class' => $providerClass,
+            'is_active' => true,
+            'metadata' => [
+                'self_registered' => true,
+                'name' => $info['name'] ?? $pluginKey,
+                'package' => $info['package'] ?? null,
+                'icon' => $info['icon'] ?? null,
+                'subscription_name' => $info['subscription_name'] ?? null,
+            ],
+        ];
+
+        // A plugin calls this as it boots, so in every process. Its row is
+        // written at most once a minute, like touchActivity(), unless what it
+        // registers has changed.
+        $cacheKey = 'mc_bridge_self_' . $pluginKey;
+        $signature = md5(serialize($values));
+        try {
+            $written = Cache::get($cacheKey);
+        } catch (\Throwable $e) {
+            $written = null;
+        }
+        if (is_array($written) && ($written['signature'] ?? null) === $signature
+            && time() - (int) ($written['at'] ?? 0) < 60) {
+            return;
+        }
+
         // Persist to registry so it survives until the next discover() pass
         try {
-            PluginRegistry::updateOrCreate(
-                ['plugin_name' => $pluginKey],
-                [
-                    'plugin_class' => $providerClass,
-                    'is_active' => true,
-                    'metadata' => [
-                        'self_registered' => true,
-                        'name' => $info['name'] ?? $pluginKey,
-                        'package' => $info['package'] ?? null,
-                        'icon' => $info['icon'] ?? null,
-                        'subscription_name' => $info['subscription_name'] ?? null,
-                    ],
-                    'last_seen_at' => now(),
-                ]
-            );
+            $this->saveSelfRegistration($pluginKey, $values + ['last_seen_at' => now()]);
 
             // Flush any pending capabilities for this plugin
             $this->flushPendingCapabilities($pluginKey);
@@ -844,7 +955,27 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
             Log::debug("[Manager Core] Plugin '{$pluginKey}' self-registered with the Plugin Bridge");
         } catch (\Throwable $e) {
             Log::warning("[Manager Core] Could not persist self-registration for {$pluginKey}: " . $e->getMessage());
+
+            return;
         }
+
+        try {
+            Cache::put($cacheKey, ['signature' => $signature, 'at' => time()], 120);
+        } catch (\Throwable $e) {
+            // Without the cache the row is simply written again next time.
+        }
+    }
+
+    /**
+     * Write the registry row of a plugin that registered itself.
+     *
+     * @param string $pluginKey
+     * @param array $values
+     * @return void
+     */
+    protected function saveSelfRegistration(string $pluginKey, array $values): void
+    {
+        PluginRegistry::updateOrCreate(['plugin_name' => $pluginKey], $values);
     }
 
     /**
@@ -912,11 +1043,24 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
     }
 
     /**
+     * Plugins from outside the suite that registered themselves, with the
+     * same fields as getPlugins() plus 'external' => true. Filled by
+     * discover(); the Plugin Bridge page lists them under Compatible Plugins.
+     *
+     * @return array
+     */
+    public function getExternalPlugins()
+    {
+        return $this->externalPlugins;
+    }
+
+    /**
      * Register a capability that this or another plugin provides
      *
-     * Resilient to boot-order: if the plugin's registry row doesn't exist yet
-     * (because the plugin booted before MC's discover() ran), the capability
-     * is buffered in $pendingCapabilities and flushed on the next discover().
+     * The handler can be called at once. Its name is stored on the plugin's
+     * registry row once the boot is over (see $pendingCapabilities), for
+     * bridge.discoverCapabilities and the Plugin Bridge page. Manager Core's
+     * own are never stored there (see SELF_KEY).
      *
      * @param string $pluginName
      * @param string $capability
@@ -931,31 +1075,81 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
 
         $this->capabilities[$pluginName][$capability] = $handler;
 
-        // Buffer the capability name for DB persistence
-        if (!isset($this->pendingCapabilities[$pluginName])) {
-            $this->pendingCapabilities[$pluginName] = [];
+        if ($pluginName === self::SELF_KEY) {
+            return;
         }
-        if (!in_array($capability, $this->pendingCapabilities[$pluginName])) {
+
+        if (!in_array($capability, $this->pendingCapabilities[$pluginName] ?? [], true)) {
             $this->pendingCapabilities[$pluginName][] = $capability;
         }
 
-        // Try to flush to DB now (works if registry row exists already)
-        $persisted = $this->flushPendingCapabilities($pluginName);
+        $this->scheduleCapabilityFlush();
+    }
 
-        // M9: log accurately — distinguish "in memory only" from "persisted to registry"
-        if ($persisted) {
-            Log::debug("[Manager Core] Plugin '{$pluginName}' registered capability '{$capability}' (in-memory + persisted)");
-        } else {
-            Log::debug("[Manager Core] Plugin '{$pluginName}' registered capability '{$capability}' (in-memory only — registry row not yet present, will persist on next discover())");
+    /**
+     * Store every pending name once the boot is over, or now if it is.
+     *
+     * @return void
+     */
+    protected function scheduleCapabilityFlush(): void
+    {
+        if ($this->flushScheduled) {
+            return;
+        }
+
+        $this->flushScheduled = true;
+        $this->whenBooted(function () {
+            $this->flushScheduled = false;
+            $this->flushAllPendingCapabilities();
+        });
+    }
+
+    /**
+     * Run $callback once every service provider has booted, or now when that
+     * has already happened or there is no Laravel application around it.
+     *
+     * @param callable $callback
+     * @return void
+     */
+    protected function whenBooted(callable $callback): void
+    {
+        $app = function_exists('app') ? app() : null;
+        if ($app instanceof \Illuminate\Foundation\Application && !$app->isBooted()) {
+            $app->booted($callback);
+
+            return;
+        }
+
+        $callback();
+    }
+
+    /**
+     * Store the pending names of every plugin that has a registry row, with
+     * one query for all the rows.
+     *
+     * @return void
+     */
+    protected function flushAllPendingCapabilities(): void
+    {
+        if (empty($this->pendingCapabilities)) {
+            return;
+        }
+
+        try {
+            foreach ($this->registryRows(array_keys($this->pendingCapabilities)) as $pluginName => $row) {
+                $this->storePendingCapabilities((string) $pluginName, $row);
+            }
+        } catch (\Exception $e) {
+            // Table may not exist during install/migration: keep buffered
+            Log::warning('[Manager Core] Could not store plugin capabilities: ' . $e->getMessage());
         }
     }
 
     /**
      * Flush buffered capabilities to PluginRegistry for a given plugin
      *
-     * Called from registerCapability and from discover() after registry rows
-     * are created, so capabilities registered before the plugin's row existed
-     * are persisted on the next opportunity.
+     * Called from discover() right after it makes or updates the plugin's
+     * row, and from registerSelf().
      *
      * @param string $pluginName
      * @return bool true if capabilities were persisted to the DB, false if still buffered
@@ -967,26 +1161,78 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         }
 
         try {
-            $plugin = PluginRegistry::where('plugin_name', $pluginName)->first();
+            $plugin = $this->registryRows([$pluginName])[$pluginName] ?? null;
             if (!$plugin) {
                 // Registry row doesn't exist yet — keep buffered for next attempt
                 return false;
             }
 
-            $existing = $plugin->capabilities ?? [];
-            $merged = array_values(array_unique(array_merge($existing, $this->pendingCapabilities[$pluginName])));
+            $this->storePendingCapabilities($pluginName, $plugin);
 
-            if ($merged !== $existing) {
-                $plugin->update(['capabilities' => $merged]);
-            }
-
-            unset($this->pendingCapabilities[$pluginName]);
             return true;
         } catch (\Exception $e) {
             // Table may not exist during install/migration — keep buffered
             Log::warning("[Manager Core] Could not flush capabilities for {$pluginName}: " . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Add a plugin's pending names to its row. A name the plugin no longer
+     * registers comes off in pruneStaleCapabilities(), not here.
+     *
+     * @param string $pluginName
+     * @param PluginRegistry $row
+     * @return void
+     */
+    protected function storePendingCapabilities(string $pluginName, $row): void
+    {
+        $existing = $row->capabilities ?? [];
+        $merged = array_values(array_unique(array_merge($existing, $this->pendingCapabilities[$pluginName] ?? [])));
+
+        if ($merged !== $existing) {
+            $this->saveCapabilities($row, $merged);
+            Log::info("[Manager Core] Stored capabilities for {$pluginName}", ['added' => array_values(array_diff($merged, $existing))]);
+        }
+
+        unset($this->pendingCapabilities[$pluginName]);
+    }
+
+    /**
+     * Registry rows for these plugins, keyed by plugin name.
+     *
+     * @param string[] $pluginNames
+     * @return array<string, PluginRegistry>
+     */
+    protected function registryRows(array $pluginNames): array
+    {
+        return PluginRegistry::whereIn('plugin_name', $pluginNames)->get()->keyBy('plugin_name')->all();
+    }
+
+    /**
+     * Write a registry row's capability list.
+     *
+     * @param PluginRegistry $row
+     * @param string[] $capabilities
+     * @return void
+     */
+    protected function saveCapabilities($row, array $capabilities): void
+    {
+        $row->update(['capabilities' => $capabilities]);
+    }
+
+    /**
+     * Capability names registered in this process, [pluginName => [names]],
+     * for one plugin or all of them. Manager Core's own are only ever here.
+     *
+     * @param string|null $pluginName
+     * @return array<string, string[]>
+     */
+    public function registeredCapabilityNames(?string $pluginName = null): array
+    {
+        $names = array_map('array_keys', $this->capabilities);
+
+        return $pluginName === null ? $names : array_intersect_key($names, [$pluginName => true]);
     }
 
     /**

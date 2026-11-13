@@ -20,6 +20,7 @@ use ManagerCore\Services\EventBus;
  *
  *     if (class_exists(\ManagerCore\Topics::class)) {
  *         \ManagerCore\Topics::publish('mining.tax_created', [
+ *             'tax_id'       => $taxId,
  *             'character_id' => $charId,
  *             'period'       => $period,
  *             'amount'       => $amount,
@@ -127,23 +128,33 @@ class Topics
     {
         return [
             // -------- Mining Manager --------
+            // Bill events are keyed on the bill. A character can have two bills
+            // in one calendar month (twice-monthly or weekly billing), and
+            // `period` is that month, so a period key took the second for a
+            // repeat. Mining Manager has sent tax_id since 2.0.0.
             'mining.tax_created' => [
                 'publisher' => 'mining-manager',
-                'required' => ['character_id', 'period'],
-                'idempotency_template' => 'tax_created:{period}:{character_id}',
-                'description' => 'A monthly mining tax record was created for a character.',
+                'required' => ['tax_id', 'character_id', 'period'],
+                'idempotency_template' => 'tax_created:{tax_id}',
+                'description' => 'A mining tax bill was raised for a character, one per billing period (monthly, twice monthly or weekly).',
             ],
             'mining.tax_paid' => [
                 'publisher' => 'mining-manager',
-                'required' => ['character_id', 'period'],
-                'idempotency_template' => 'tax_paid:{period}:{character_id}',
-                'description' => 'A character paid an outstanding mining tax invoice.',
+                'required' => ['tax_id', 'character_id', 'period'],
+                'idempotency_template' => 'tax_paid:{tax_id}',
+                'description' => 'A mining tax bill was paid in full, by the wallet, held credit or a director.',
             ],
             'mining.tax_overdue' => [
                 'publisher' => 'mining-manager',
-                'required' => ['character_id', 'period'],
-                'idempotency_template' => 'tax_overdue:{period}:{character_id}',
-                'description' => 'A mining tax invoice passed its due date without payment.',
+                'required' => ['tax_id', 'character_id', 'period'],
+                'idempotency_template' => 'tax_overdue:{tax_id}',
+                'description' => 'A mining tax bill nothing was paid on passed its due date.',
+            ],
+            'mining.tax_written_off' => [
+                'publisher' => 'mining-manager',
+                'required' => ['tax_id', 'character_id', 'status'],
+                'idempotency_template' => 'tax_written_off:{tax_id}',
+                'description' => 'A director let a mining tax bill off (status waived or exempted). Nothing is left to pay on it.',
             ],
             'mining.invoice_sent' => [
                 'publisher' => 'mining-manager',
@@ -156,6 +167,14 @@ class Topics
                 'required' => ['incident_id'],
                 'idempotency_template' => 'theft_detected:{incident_id}',
                 'description' => 'A mining theft incident was recorded by the theft detector.',
+            ],
+            // An incident can close, reopen and close again, so the key carries
+            // when it closed.
+            'mining.theft_resolved' => [
+                'publisher' => 'mining-manager',
+                'required' => ['incident_id', 'character_id', 'status'],
+                'idempotency_template' => 'theft_resolved:{incident_id}:{resolved_at}',
+                'description' => 'A mining theft incident closed (status resolved, false_alarm, or removed_paid once nothing was overdue).',
             ],
             'mining.jackpot_detected' => [
                 'publisher' => 'mining-manager',
@@ -213,14 +232,17 @@ class Topics
             // ingest these into their tactical-event calendar, fire pre-expiry
             // reminder pings, and prune on expired.
             //
-            // eve_time for the calendar = window_closes_at (= fractured_at + 48h),
-            // i.e. when the ready window ends. window_opens_at and unstable_starts_at
-            // are also in the payload for richer renders.
+            // eve_time for the calendar = window_closes_at, when the ready window
+            // ends: fracture + 48h, or 72h / 96h when the refinery has a Moon
+            // Drilling Stability or Proficiency rig. Take it from the payload rather
+            // than adding 48h, since the window differs chunk by chunk.
+            // window_opens_at, unstable_starts_at and mining_window_hours are also
+            // in the payload for richer renders.
             'mining.extraction_ready' => [
                 'publisher' => 'mining-manager',
                 'required' => ['extraction_id'],
                 'idempotency_template' => 'extraction_ready:{extraction_id}',
-                'description' => 'A moon extraction transitioned to the ready window (chunk fractured, 48h fleet-able mining begins).',
+                'description' => 'A moon extraction transitioned to the ready window (chunk fractured, its mining window begins: 48h, or 72h / 96h with a Moon Drilling Stability or Proficiency rig).',
             ],
             'mining.extraction_unstable' => [
                 'publisher' => 'mining-manager',
@@ -232,7 +254,7 @@ class Topics
                 'publisher' => 'mining-manager',
                 'required' => ['extraction_id'],
                 'idempotency_template' => 'extraction_expired:{extraction_id}',
-                'description' => 'A moon extraction has expired (past 50h after fracture, window closed).',
+                'description' => 'A moon extraction has expired (past its mining window and the 2h unstable tail, window closed).',
             ],
 
             // -------- Structure Manager --------
@@ -319,8 +341,8 @@ class Topics
             'structure.doctrine.changed' => [
                 'publisher' => 'structure-manager',
                 'required' => [],
-                'idempotency_template' => 'structure.doctrine.changed:{scope_type}:{scope_id}:{action}',
-                'description' => 'A structure-fitting doctrine (or a compliance setting) changed in Structure Manager. Payload carries scope_type/scope_id, optional structure_type_id + security_band, and action (created/updated/deleted/settings). Consumers re-pull compliance via the structure-manager:compliance.getForCorporation capability.',
+                'idempotency_template' => 'structure.doctrine.changed:{scope_type}:{scope_id}:{action}:{changed_at}',
+                'description' => 'A structure-fitting doctrine (or a compliance setting) changed in Structure Manager. Payload carries scope_type/scope_id, optional structure_type_id + security_band, action (created/updated/deleted/settings) and changed_at, which keeps a second change to the same scope from reading as a repeat. Consumers re-pull compliance via the structure-manager:compliance.getForCorporation capability.',
             ],
 
             // -------- Wallet (Corp Wallet Manager) --------

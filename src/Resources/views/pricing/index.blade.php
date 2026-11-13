@@ -93,8 +93,8 @@
                             <tr>
                                 <th>Type ID</th>
                                 <th>Market</th>
-                                <th>Buy</th>
-                                <th>Sell</th>
+                                <th>Side</th>
+                                <th>Price</th>
                                 <th>Updated</th>
                             </tr>
                         </thead>
@@ -103,8 +103,9 @@
                             <tr>
                                 <td>{{ $price->type_id }}</td>
                                 <td>{{ strtoupper($price->market) }}</td>
-                                <td>{{ number_format($price->buy, 2) }}</td>
-                                <td>{{ number_format($price->sell, 2) }}</td>
+                                <td>{{ ucfirst($price->price_type) }}</td>
+                                {{-- One row per side, priced the way PricingService prices it for plugins: lowest sell, highest buy. --}}
+                                <td>{{ number_format((float) ($price->price_type === 'buy' ? $price->price_max : $price->price_min), 2) }}</td>
                                 <td>{{ $price->updated_at->diffForHumans() }}</td>
                             </tr>
                             @endforeach

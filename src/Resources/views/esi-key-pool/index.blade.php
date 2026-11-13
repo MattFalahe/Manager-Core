@@ -69,7 +69,37 @@
     text-transform: uppercase;
     letter-spacing: 1px;
 }
-/* Modals render outside .manager-core-wrapper, scope inline */
+.manager-core-wrapper .kp-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+.manager-core-wrapper .kp-toolbar label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0;
+    font-size: 0.82rem;
+    font-weight: normal;
+    color: #8b95a5;
+}
+.manager-core-wrapper .kp-toolbar select { width: auto; min-width: 8rem; }
+.manager-core-wrapper .kp-corp-divider td {
+    padding: 0;
+    height: 0;
+    border-top: 2px solid #667eea;
+}
+.manager-core-wrapper .kp-pager {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+    color: #8b95a5;
+}
+/* The Add Director modal opens from <body>, scope inline */
 .modal .esi-key-pool-modal { background: #2a2f3a; border: 1px solid #454d55; }
 .modal .esi-key-pool-modal .modal-title { color: #fff; }
 </style>
@@ -108,7 +138,7 @@
         <strong>Fast ESI notification polling:</strong> Manager Core polls the ESI notifications endpoint
         directly from admin-assigned director characters in a per-corp fair LRU rotation. Every plugin that
         registers handlers (Structure Manager, Mining Manager, etc.) shares this pool. Backed by an
-        always-on SeAT-native sweep every 10 minutes that catches any notifications the fast-poll missed.
+        always-on SeAT-native sweep every minute that catches any notifications the fast-poll missed.
     </div>
 
     {{-- Auto-tuning snapshot. Shows the operator what the next poll cycle will
@@ -135,7 +165,7 @@
             <i class="fas fa-exclamation-triangle"></i>
             <strong>No eligible directors in pool.</strong> Add at least one
             director below to enable fast-polling. Detection currently relies
-            entirely on SeAT's native 20-30 min cadence + MC's 10-min sweep.
+            entirely on SeAT's native 20-30 min cadence + MC's sweep every minute.
         </div>
     @endif
 
@@ -176,13 +206,29 @@
             <h4><i class="fas fa-plug"></i> Subscribed Plugins</h4>
             <table class="table table-sm table-dark" style="font-size:0.88rem;">
                 <thead>
-                    <tr><th>Plugin</th><th>Registered Types</th><th>Handler Classes</th></tr>
+                    <tr><th>Plugin</th><th>Registered Types</th><th title="How old a notification may be and still go to this plugin. Manager Core keeps them up to two weeks.">Max Age</th><th>Handler Classes</th></tr>
                 </thead>
                 <tbody>
                     @foreach($pluginRegistrations as $plugin => $info)
+                        @php
+                            // The age most of the plugin's types share, then any type that differs.
+                            $ages = array_map(fn ($hours) => (string) $hours, $info['max_age_hours'] ?? []);
+                            $shared = array_count_values($ages);
+                            arsort($shared);
+                            // array_count_values turns "2" into the key 2, hence the cast back.
+                            $usual = array_key_first($shared);
+                            $usual = $usual === null ? null : (string) $usual;
+                            $ageText = $usual === null ? '' : $usual . ' h';
+                            foreach ($ages as $ageType => $hours) {
+                                if ($hours !== $usual) {
+                                    $ageText .= ', ' . $ageType . ' ' . $hours . ' h';
+                                }
+                            }
+                        @endphp
                         <tr>
                             <td><strong>{{ $plugin }}</strong></td>
                             <td>{{ count($info['types']) }} types</td>
+                            <td>{{ $ageText }}</td>
                             <td>
                                 @foreach($info['handlers'] as $handler)
                                     <code style="font-size:0.78rem;">{{ $handler }}</code><br>
@@ -225,9 +271,11 @@
     </div>
 
     {{-- Add Director Modal --}}
-    <div class="modal fade" id="addKeyHolderModal" tabindex="-1" role="dialog">
+    {{-- manager-core-wrapper on the modal itself: it is moved to <body>
+         before it opens, out of reach of the page wrapper's rules. --}}
+    <div class="modal fade manager-core-wrapper" id="addKeyHolderModal" tabindex="-1" role="dialog">
         <div class="modal-dialog modal-lg" role="document">
-            <div class="modal-content">
+            <div class="modal-content esi-key-pool-modal">
                 <div class="modal-header" style="border-bottom-color:#454d55;">
                     <h5 class="modal-title">
                         <i class="fas fa-user-plus"></i> Add Director to Key Pool
@@ -260,85 +308,179 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
+// Every action reloads the list and redraws the table, so the operator's
+// filters, page size and page live out here to survive it.
+const keyPoolView = { corp: '', status: '', perPage: 25, page: 1 };
+let keyPoolRows = [];
+
+const KEY_POOL_STATUSES = ['healthy', 'degraded', 'suspended', 'needs_attention', 'disabled', 'unknown'];
+
 function loadKeyHolders() {
     $.get('{{ route("manager-core.esi-key-pool.list") }}', function(data) {
-        if (data.length === 0) {
-            $('#key-holders-container').html(
-                '<div class="info-banner"><i class="fas fa-info-circle"></i> No key holders in pool yet. Click "Add Director" above to start.</div>'
-            );
-            return;
+        keyPoolRows = data;
+        renderKeyHolders();
+    }).fail(function(xhr) {
+        $('#key-holders-container').html(
+            '<div class="info-banner warning"><i class="fas fa-exclamation-triangle"></i> Could not load the key pool (HTTP ' + escapeHtml(xhr.status) + '). Reload the page to try again.</div>'
+        );
+    });
+}
+
+function renderKeyHolders() {
+    if (keyPoolRows.length === 0) {
+        $('#key-holders-container').html(
+            '<div class="info-banner"><i class="fas fa-info-circle"></i> No key holders in pool yet. Click "Add Director" above to start.</div>'
+        );
+        return;
+    }
+
+    // The list arrives sorted by corporation id, then name, which is the
+    // order the corporation filter offers them in.
+    const corps = [];
+    const corpCounts = {};
+    const statusCounts = {};
+    keyPoolRows.forEach(function(kh) {
+        const id = String(kh.corporation_id);
+        if (!(id in corpCounts)) {
+            corpCounts[id] = 0;
+            corps.push({ id: id, name: kh.corporation_name || ('Corp #' + kh.corporation_id) });
+        }
+        corpCounts[id]++;
+        statusCounts[kh.health_status] = (statusCounts[kh.health_status] || 0) + 1;
+    });
+
+    // A filter whose last match was just removed would show an empty table.
+    if (keyPoolView.corp !== '' && !(keyPoolView.corp in corpCounts)) keyPoolView.corp = '';
+    if (keyPoolView.status !== '' && !statusCounts[keyPoolView.status]) keyPoolView.status = '';
+
+    const rows = keyPoolRows.filter(function(kh) {
+        return (keyPoolView.corp === '' || String(kh.corporation_id) === keyPoolView.corp)
+            && (keyPoolView.status === '' || kh.health_status === keyPoolView.status);
+    });
+
+    const pages = keyPoolView.perPage > 0 ? Math.max(1, Math.ceil(rows.length / keyPoolView.perPage)) : 1;
+    keyPoolView.page = Math.min(Math.max(1, keyPoolView.page), pages);
+    const start = keyPoolView.perPage > 0 ? (keyPoolView.page - 1) * keyPoolView.perPage : 0;
+    const shown = keyPoolView.perPage > 0 ? rows.slice(start, start + keyPoolView.perPage) : rows;
+
+    let html = '<div class="kp-toolbar">';
+    html += '<label>Corporation <select class="form-control form-control-sm kp-filter" data-kp="corp">';
+    html += '<option value="">All corporations (' + keyPoolRows.length + ')</option>';
+    corps.forEach(function(c) {
+        html += '<option value="' + escapeHtml(c.id) + '"' + (keyPoolView.corp === c.id ? ' selected' : '') + '>' + escapeHtml(c.name) + ' (' + corpCounts[c.id] + ')</option>';
+    });
+    html += '</select></label>';
+    html += '<label>Status <select class="form-control form-control-sm kp-filter" data-kp="status">';
+    html += '<option value="">All statuses</option>';
+    KEY_POOL_STATUSES.forEach(function(s) {
+        if (!statusCounts[s]) return;
+        html += '<option value="' + s + '"' + (keyPoolView.status === s ? ' selected' : '') + '>' + s.replace('_', ' ') + ' (' + statusCounts[s] + ')</option>';
+    });
+    html += '</select></label>';
+    html += '<label>Rows per page <select class="form-control form-control-sm kp-filter" data-kp="perPage">';
+    [25, 50, 75, 100, 0].forEach(function(n) {
+        html += '<option value="' + n + '"' + (keyPoolView.perPage === n ? ' selected' : '') + '>' + (n === 0 ? 'All' : n) + '</option>';
+    });
+    html += '</select></label>';
+    html += '</div>';
+
+    html += '<table class="table table-sm table-dark" style="font-size:0.88rem;">';
+    html += '<thead><tr><th>Character</th><th>Character ID</th><th>Corporation Name</th><th>Corp ID</th><th>Status</th><th>Last Poll</th><th>Polls</th><th>Found</th><th>Actions</th></tr></thead><tbody>';
+
+    if (shown.length === 0) {
+        html += '<tr><td colspan="9" class="text-center" style="color:#8b95a5;">No key holders match these filters.</td></tr>';
+    }
+
+    let previousCorp = null;
+    shown.forEach(function(kh) {
+        if (previousCorp !== null && String(kh.corporation_id) !== previousCorp) {
+            html += '<tr class="kp-corp-divider"><td colspan="9"></td></tr>';
+        }
+        previousCorp = String(kh.corporation_id);
+
+        const statusBadge = '<span class="badge ' + escapeHtml(kh.health_badge) + '">' + escapeHtml(kh.health_status) + '</span>';
+        const scopeBadge = kh.has_scope
+            ? '<span class="badge badge-success" title="Has notification scope">scope</span>'
+            : '<span class="badge badge-danger" title="Missing scope">no scope</span>';
+
+        // Category badge (shows failure flavor when applicable). Hidden
+        // for healthy chars so the row stays uncluttered.
+        let categoryBadge = '';
+        if (kh.failure_category) {
+            const catColor = {
+                'terminal_auth': 'badge-dark',
+                'scope_missing': 'badge-danger',
+                'transient_auth': 'badge-warning',
+                'rate_limited': 'badge-warning',
+                'network': 'badge-info',
+                'unknown': 'badge-secondary'
+            }[kh.failure_category] || 'badge-secondary';
+            categoryBadge = ' <span class="badge ' + catColor + '" title="Failure category">' + escapeHtml(kh.failure_category) + '</span>';
         }
 
-        let html = '<table class="table table-sm table-dark" style="font-size:0.88rem;">';
-        html += '<thead><tr><th>Character</th><th>Corp ID</th><th>Status</th><th>Last Poll</th><th>Polls</th><th>Found</th><th>Actions</th></tr></thead><tbody>';
+        const lastPoll = kh.last_polled_at ? moment(kh.last_polled_at).fromNow() : 'never';
 
-        data.forEach(function(kh) {
-            const statusBadge = '<span class="badge ' + escapeHtml(kh.health_badge) + '">' + escapeHtml(kh.health_status) + '</span>';
-            const scopeBadge = kh.has_scope
-                ? '<span class="badge badge-success" title="Has notification scope">scope</span>'
-                : '<span class="badge badge-danger" title="Missing scope">no scope</span>';
+        // Retry-in label appears for suspended chars so operators see
+        // when auto-recovery will try them again.
+        const retryLabel = kh.retry_available_at
+            ? '<br><small style="color:#8b95a5;"><i class="fas fa-redo"></i> auto-retry: ' + escapeHtml(kh.retry_available_at) + '</small>'
+            : '';
 
-            // Category badge (shows failure flavor when applicable). Hidden
-            // for healthy chars so the row stays uncluttered.
-            let categoryBadge = '';
-            if (kh.failure_category) {
-                const catColor = {
-                    'terminal_auth': 'badge-dark',
-                    'scope_missing': 'badge-danger',
-                    'transient_auth': 'badge-warning',
-                    'rate_limited': 'badge-warning',
-                    'network': 'badge-info',
-                    'unknown': 'badge-secondary'
-                }[kh.failure_category] || 'badge-secondary';
-                categoryBadge = ' <span class="badge ' + catColor + '" title="Failure category">' + escapeHtml(kh.failure_category) + '</span>';
-            }
+        const toggleBtn = kh.enabled
+            ? '<button class="btn btn-xs btn-warning" onclick="toggleKeyHolder(' + kh.id + ')" title="Disable polling"><i class="fas fa-pause"></i></button>'
+            : '<button class="btn btn-xs btn-success" onclick="toggleKeyHolder(' + kh.id + ')" title="Enable polling"><i class="fas fa-play"></i></button>';
 
-            const lastPoll = kh.last_polled_at ? moment(kh.last_polled_at).fromNow() : 'never';
+        // Resume button — shown when there are failures OR an active
+        // suspension. One-click clears the failure state so the char
+        // re-enters rotation immediately on the next poll (without
+        // waiting for the auto-retry cooldown).
+        let resumeBtn = '';
+        if (kh.consecutive_failures > 0 || kh.suspended_until) {
+            resumeBtn = ' <button class="btn btn-xs btn-info" onclick="resumeKeyHolder(' + kh.id + ', \'' + escapeHtml(kh.character_name || '').replace(/'/g, "\\'") + '\')" title="Clear failures and retry now"><i class="fas fa-redo-alt"></i></button>';
+        }
 
-            // Retry-in label appears for suspended chars so operators see
-            // when auto-recovery will try them again.
-            const retryLabel = kh.retry_available_at
-                ? '<br><small style="color:#8b95a5;"><i class="fas fa-redo"></i> auto-retry: ' + escapeHtml(kh.retry_available_at) + '</small>'
-                : '';
+        const removeBtn = '<button class="btn btn-xs btn-danger" onclick="removeKeyHolder(' + kh.id + ', \'' + escapeHtml(kh.character_name || '').replace(/'/g, "\\'") + '\')" title="Remove from pool"><i class="fas fa-trash"></i></button>';
 
-            const toggleBtn = kh.enabled
-                ? '<button class="btn btn-xs btn-warning" onclick="toggleKeyHolder(' + kh.id + ')" title="Disable polling"><i class="fas fa-pause"></i></button>'
-                : '<button class="btn btn-xs btn-success" onclick="toggleKeyHolder(' + kh.id + ')" title="Enable polling"><i class="fas fa-play"></i></button>';
+        html += '<tr' + (kh.enabled ? '' : ' style="opacity:0.5;"') + '>';
+        html += '<td>' + escapeHtml(kh.character_name || 'Unknown') + retryLabel + '</td>';
+        html += '<td>' + escapeHtml(kh.character_id) + '</td>';
+        html += '<td>' + escapeHtml(kh.corporation_name || ('Corp #' + kh.corporation_id)) + '</td>';
+        html += '<td>' + escapeHtml(kh.corporation_id || '-') + '</td>';
+        html += '<td>' + statusBadge + ' ' + scopeBadge + categoryBadge + '</td>';
+        html += '<td>' + lastPoll + '</td>';
+        html += '<td>' + kh.total_polls + '</td>';
+        html += '<td>' + kh.total_notifications_found + '</td>';
+        html += '<td>' + toggleBtn + resumeBtn + ' ' + removeBtn + '</td>';
+        html += '</tr>';
 
-            // Resume button — shown when there are failures OR an active
-            // suspension. One-click clears the failure state so the char
-            // re-enters rotation immediately on the next poll (without
-            // waiting for the auto-retry cooldown).
-            let resumeBtn = '';
-            if (kh.consecutive_failures > 0 || kh.suspended_until) {
-                resumeBtn = ' <button class="btn btn-xs btn-info" onclick="resumeKeyHolder(' + kh.id + ', \'' + escapeHtml(kh.character_name || '').replace(/'/g, "\\'") + '\')" title="Clear failures and retry now"><i class="fas fa-redo-alt"></i></button>';
-            }
-
-            const removeBtn = '<button class="btn btn-xs btn-danger" onclick="removeKeyHolder(' + kh.id + ', \'' + escapeHtml(kh.character_name || '').replace(/'/g, "\\'") + '\')" title="Remove from pool"><i class="fas fa-trash"></i></button>';
-
-            html += '<tr' + (kh.enabled ? '' : ' style="opacity:0.5;"') + '>';
-            html += '<td>' + escapeHtml(kh.character_name || 'Unknown') + retryLabel + '</td>';
-            html += '<td>' + escapeHtml(kh.corporation_id || '-') + '</td>';
-            html += '<td>' + statusBadge + ' ' + scopeBadge + categoryBadge + '</td>';
-            html += '<td>' + lastPoll + '</td>';
-            html += '<td>' + kh.total_polls + '</td>';
-            html += '<td>' + kh.total_notifications_found + '</td>';
-            html += '<td>' + toggleBtn + resumeBtn + ' ' + removeBtn + '</td>';
-            html += '</tr>';
-
-            if (kh.last_error) {
-                html += '<tr><td colspan="7" style="font-size:0.78rem; color:#e57373; padding-top:0;"><i class="fas fa-exclamation-triangle"></i> ' + escapeHtml(kh.last_error) + '</td></tr>';
-            }
-        });
-
-        html += '</tbody></table>';
-        $('#key-holders-container').html(html);
+        if (kh.last_error) {
+            html += '<tr><td colspan="9" style="font-size:0.78rem; color:#e57373; padding-top:0;"><i class="fas fa-exclamation-triangle"></i> ' + escapeHtml(kh.last_error) + '</td></tr>';
+        }
     });
+
+    html += '</tbody></table>';
+
+    const first = rows.length === 0 ? 0 : start + 1;
+    html += '<div class="kp-pager"><span>Showing ' + first + ' to ' + (start + shown.length) + ' of ' + rows.length;
+    if (rows.length !== keyPoolRows.length) {
+        html += ' (filtered from ' + keyPoolRows.length + ')';
+    }
+    html += '</span>';
+    if (pages > 1) {
+        html += '<span>';
+        html += '<button type="button" class="btn btn-xs btn-secondary kp-page" data-page="' + (keyPoolView.page - 1) + '"' + (keyPoolView.page === 1 ? ' disabled' : '') + ' title="Previous page"><i class="fas fa-chevron-left"></i></button>';
+        html += ' Page ' + keyPoolView.page + ' of ' + pages + ' ';
+        html += '<button type="button" class="btn btn-xs btn-secondary kp-page" data-page="' + (keyPoolView.page + 1) + '"' + (keyPoolView.page === pages ? ' disabled' : '') + ' title="Next page"><i class="fas fa-chevron-right"></i></button>';
+        html += '</span>';
+    }
+    html += '</div>';
+
+    $('#key-holders-container').html(html);
 }
 
 $('#btn-add-key-holder').on('click', function() {
     $('#eligible-characters-container').html('<div class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Loading eligible directors...</div>');
-    $('#addKeyHolderModal').modal('show');
+    $('#addKeyHolderModal').appendTo('body').modal('show');
 
     $.get('{{ route("manager-core.esi-key-pool.eligible") }}', function(data) {
         if (data.length === 0) {
@@ -424,6 +566,16 @@ function removeKeyHolder(id, name) {
 }
 
 $(document).ready(function() {
+    $('#key-holders-container').on('change', '.kp-filter', function() {
+        const key = $(this).data('kp');
+        keyPoolView[key] = key === 'perPage' ? parseInt($(this).val(), 10) : $(this).val();
+        keyPoolView.page = 1;
+        renderKeyHolders();
+    }).on('click', '.kp-page', function() {
+        keyPoolView.page = parseInt($(this).data('page'), 10);
+        renderKeyHolders();
+    });
+
     loadKeyHolders();
 });
 </script>

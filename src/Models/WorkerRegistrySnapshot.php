@@ -67,7 +67,7 @@ class WorkerRegistrySnapshot extends Model
      * Health status for the dashboard. Returns one of:
      *   'healthy'  — handlers registered, key pool populated, recent
      *   'warning'  — handlers registered but key pool empty, OR snapshot is older than 5 minutes
-     *   'error'    — zero handlers (the smoking-gun case from the 2026-05-11 session)
+     *   'error'    — zero handlers: the worker registered none, so nothing it polls reaches a plugin
      *   'stale'    — snapshot older than 1 hour
      */
     public function getHealthAttribute(): string

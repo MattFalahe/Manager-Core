@@ -290,19 +290,16 @@
                     <button class="btn btn-mc mb-3" onclick="testAllPlugins()" id="btn-test-all"><i class="fas fa-play"></i> Test All Plugins</button>
                     <div id="plugin-results">
                         @foreach($plugins as $key => $plugin)
-                        <div class="plugin-card" id="plugin-card-{{ $key }}">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <i class="fas {{ $plugin['icon'] ?? 'fa-puzzle-piece' }}" style="color: #17a2b8; margin-right: 8px;"></i>
-                                    <span class="plugin-name">{{ $plugin['name'] }}</span>
-                                    <span class="badge-status badge-inactive" id="status-{{ $key }}">Untested</span>
-                                </div>
-                                <button class="btn btn-mc btn-sm" onclick="testPlugin('{{ $key }}')"><i class="fas fa-stethoscope"></i> Test</button>
-                            </div>
-                            <div class="plugin-package">{{ $plugin['package'] }}</div>
-                            <div class="plugin-details" id="details-{{ $key }}" style="display: none;"></div>
-                        </div>
+                            @include('manager-core::partials._diagnostic_plugin_card')
                         @endforeach
+
+                        @if(!empty($externalPlugins))
+                            <h5 style="color: #e2e8f0; margin: 20px 0 6px;"><i class="fas fa-puzzle-piece"></i> Compatible plugins</h5>
+                            <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 10px;">Plugins that aren't part of this suite but registered themselves with the Plugin Bridge. Test All Plugins covers them too.</p>
+                            @foreach($externalPlugins as $key => $plugin)
+                                @include('manager-core::partials._diagnostic_plugin_card')
+                            @endforeach
+                        @endif
                     </div>
                 </div>
 

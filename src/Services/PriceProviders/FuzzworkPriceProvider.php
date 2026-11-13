@@ -4,6 +4,7 @@ namespace ManagerCore\Services\PriceProviders;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use ManagerCore\Models\Market;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 
@@ -14,10 +15,13 @@ use ManagerCore\Models\PriceHistory;
  * aggregation of CCP's public market data, cached and exposed without
  * needing an ESI character. No API key required.
  *
- * Region-based: each call targets a single EVE region. We translate the
- * MC market key (jita / amarr / dodixie / hek / rens) to the corresponding
- * trade-hub region. Citadel markets and custom regional markets fall back
- * to The Forge (Jita region) because Fuzzwork can't see player citadels.
+ * Station-based: each call asks about one trade hub's station, translated
+ * from the MC market key (jita / amarr / dodixie / hek / rens). Asked for a
+ * region instead, Fuzzwork answers with every order in it, so Jita's sell
+ * price would be the cheapest sell anywhere in The Forge, which can sit
+ * systems away and below anything Jita 4-4 sells at. Citadel markets and
+ * custom regional markets fall back to Jita 4-4 because Fuzzwork can't see
+ * player citadels.
  *
  * Response shape per type:
  *   {
@@ -33,25 +37,29 @@ use ManagerCore\Models\PriceHistory;
  */
 class FuzzworkPriceProvider implements PriceProviderInterface
 {
+    use ReportsFetchFailures;
+
     private const BASE_URL = 'https://market.fuzzwork.co.uk/aggregates/';
     private const HTTP_TIMEOUT = 15;
     private const BATCH_SIZE = 100;
 
     /**
-     * EVE region IDs for the main trade hubs. Anything not in this map
-     * (custom citadel markets, regional markets the operator added) falls
-     * back to The Forge (10000002 — Jita's region).
+     * The station of each main trade hub. Anything not in this map (custom
+     * citadel markets, regional markets the operator added) falls back to
+     * Jita 4-4.
      */
-    private const HUB_REGIONS = [
-        'jita' => 10000002,     // The Forge
-        'amarr' => 10000043,    // Domain
-        'dodixie' => 10000032,  // Sinq Laison
-        'hek' => 10000042,      // Metropolis
-        'rens' => 10000030,     // Heimatar
+    private const HUB_STATIONS = [
+        'jita' => 60003760,     // Jita IV - Moon 4 - Caldari Navy Assembly Plant
+        'amarr' => 60008494,    // Amarr VIII (Oris) - Emperor Family Academy
+        'dodixie' => 60011866,  // Dodixie IX - Moon 20 - Federation Navy Assembly Plant
+        'hek' => 60005686,      // Hek VIII - Moon 12 - Boundless Creation Factory
+        'rens' => 60004588,     // Rens VI - Moon 8 - Brutor Tribe Treasury
     ];
 
     public function getPrices(array $typeIds, string $market, bool $persist = true): array
     {
+        $this->resetFetchFailures();
+
         // Initialise result map so missing-data per-type returns null
         // (consumers check `is_array(...)` before reading stats fields).
         $out = array_fill_keys(array_map('intval', $typeIds), null);
@@ -60,13 +68,13 @@ class FuzzworkPriceProvider implements PriceProviderInterface
             return $out;
         }
 
-        $regionId = self::HUB_REGIONS[strtolower($market)] ?? self::HUB_REGIONS['jita'];
-        if (!isset(self::HUB_REGIONS[strtolower($market)])) {
-            Log::info("[Manager Core] Fuzzwork: market '{$market}' isn't a hub Fuzzwork tracks; falling back to The Forge (Jita region)");
+        $stationId = self::stationFor($market);
+        if (!self::tracksMarket($market)) {
+            Log::info("[Manager Core] Fuzzwork: market '{$market}' isn't a hub Fuzzwork tracks; falling back to Jita 4-4");
         }
 
         $persistTag = $persist ? '' : ' (no-persist override mode)';
-        Log::info("[Manager Core] Fetching prices from Fuzzwork for " . count($typeIds) . " types in region {$regionId} ({$market}){$persistTag}");
+        Log::info("[Manager Core] Fetching prices from Fuzzwork for " . count($typeIds) . " types at station {$stationId} ({$market}){$persistTag}");
 
         $updatedCount = 0;
         foreach (array_chunk($typeIds, self::BATCH_SIZE) as $batchIndex => $chunk) {
@@ -74,19 +82,26 @@ class FuzzworkPriceProvider implements PriceProviderInterface
                 $response = Http::timeout(self::HTTP_TIMEOUT)
                     ->acceptJson()
                     ->get(self::BASE_URL, [
-                        'region' => $regionId,
+                        'station' => $stationId,
                         'types' => implode(',', $chunk),
                     ]);
 
                 if (!$response->successful()) {
                     Log::warning("[Manager Core] Fuzzwork batch {$batchIndex} HTTP error", [
                         'status' => $response->status(),
-                        'region' => $regionId,
+                        'station' => $stationId,
                     ]);
+                    $this->recordFetchFailure($chunk, 'Fuzzwork returned HTTP ' . $response->status(), true, Market::STATUS_PROVIDER_DOWN);
                     continue;
                 }
 
-                $data = $response->json() ?: [];
+                $data = $response->json();
+                if (!is_array($data)) {
+                    Log::warning("[Manager Core] Fuzzwork batch {$batchIndex} returned something other than prices");
+                    $this->recordFetchFailure($chunk, 'Fuzzwork returned something other than prices', true, Market::STATUS_PROVIDER_DOWN);
+                    continue;
+                }
+
                 foreach ($chunk as $tid) {
                     $tidInt = (int) $tid;
                     $row = is_array($data[$tid] ?? null) ? $data[$tid] : null;
@@ -104,6 +119,7 @@ class FuzzworkPriceProvider implements PriceProviderInterface
                 }
             } catch (\Throwable $e) {
                 Log::error("[Manager Core] Fuzzwork batch {$batchIndex} exception: " . $e->getMessage());
+                $this->recordFetchFailure($chunk, 'Fuzzwork: ' . $e->getMessage(), true, Market::STATUS_PROVIDER_DOWN);
                 continue;
             }
         }
@@ -210,36 +226,41 @@ class FuzzworkPriceProvider implements PriceProviderInterface
     /**
      * Update the daily PriceHistory row so trend graphs include
      * Fuzzwork-driven points too. avg_buy / avg_sell mirror MC's existing
-     * convention (avg of all orders in bucket).
+     * convention (avg of all orders in bucket). Fuzzwork answers a type with
+     * no orders with zeroed buckets, which recordDay() leaves out.
      */
     protected function updateHistory(int $typeId, string $market, ?array $buyBucket, ?array $sellBucket): void
     {
-        $date = now()->toDateString();
-        $avgBuy = $buyBucket ? (float) ($buyBucket['avg'] ?? 0) : 0;
-        $avgSell = $sellBucket ? (float) ($sellBucket['avg'] ?? 0) : 0;
-        $maxBuy = $buyBucket ? (float) ($buyBucket['max'] ?? 0) : 0;
-        $minSell = $sellBucket ? (float) ($sellBucket['min'] ?? 0) : 0;
-        $vol = (int) (($buyBucket['volume'] ?? 0) + ($sellBucket['volume'] ?? 0));
-
-        PriceHistory::updateOrCreate(
-            [
-                'type_id' => $typeId,
-                'market' => $market,
-                'date' => $date,
-            ],
-            [
-                'avg_buy' => $avgBuy,
-                'avg_sell' => $avgSell,
-                'max_buy' => $maxBuy,
-                'min_sell' => $minSell,
-                'total_volume' => $vol,
-            ]
+        PriceHistory::recordDay(
+            $typeId,
+            $market,
+            $buyBucket ? (float) ($buyBucket['avg'] ?? 0) : 0.0,
+            $buyBucket ? (float) ($buyBucket['max'] ?? 0) : 0.0,
+            $sellBucket ? (float) ($sellBucket['avg'] ?? 0) : 0.0,
+            $sellBucket ? (float) ($sellBucket['min'] ?? 0) : 0.0,
+            (int) (($buyBucket['volume'] ?? 0) + ($sellBucket['volume'] ?? 0))
         );
     }
 
     public function getName(): string
     {
         return 'Fuzzwork Market Aggregator';
+    }
+
+    /**
+     * Whether Fuzzwork prices this market's own hub, rather than Jita 4-4 in
+     * its place. What decides whether Fuzzwork can stand in for another
+     * provider.
+     */
+    public static function tracksMarket(string $market): bool
+    {
+        return isset(self::HUB_STATIONS[strtolower($market)]);
+    }
+
+    /** The station Fuzzwork is asked about for this market. */
+    public static function stationFor(string $market): int
+    {
+        return self::HUB_STATIONS[strtolower($market)] ?? self::HUB_STATIONS['jita'];
     }
 
     /**

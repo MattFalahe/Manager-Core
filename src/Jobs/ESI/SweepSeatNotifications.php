@@ -13,21 +13,23 @@ use ManagerCore\Models\ESI\EsiKeyHolder;
 use ManagerCore\Models\ESI\EsiNotification;
 use ManagerCore\Models\WorkerRegistrySnapshot;
 use ManagerCore\Services\ESI\EsiNotificationRegistry;
+use ManagerCore\Services\ESI\NotificationAge;
 use Carbon\Carbon;
 use Symfony\Component\Yaml\Yaml;
 
 /**
  * Fallback sweep of SeAT's character_notifications table.
  *
- * Runs every 10 minutes. Picks up any notifications that the fast-poll missed
+ * Runs every minute. Picks up any notifications that the fast-poll missed
  * (all key holders had expired tokens, ESI was down during our poll window,
- * etc.) or that arrived for notification types registered AFTER fast-poll
- * last ran. Deduplicates by notification_id against the shared MC table.
+ * nobody in the key pool, etc.) or that arrived for notification types
+ * registered AFTER fast-poll last ran. Deduplicates by notification_id
+ * against the shared MC table.
  *
- * This is the "belt-and-suspenders" layer — fast-poll handles 90%+ of
- * notifications within 2 minutes; this sweep catches the rest within ~10-20
- * minutes (still faster than SeAT's 20-30 min bucket delay because we process
- * as soon as SeAT writes to its own table).
+ * This is the "belt-and-suspenders" layer. Fast-poll handles 90%+ of
+ * notifications within 2 minutes; this sweep catches the rest within a
+ * minute of SeAT writing them to its own table, which SeAT does on its
+ * 20-30 min bucket.
  */
 class SweepSeatNotifications implements ShouldQueue
 {
@@ -62,18 +64,49 @@ class SweepSeatNotifications implements ShouldQueue
             return;
         }
 
-        // Look back 2 hours — anything older is probably already processed or stale
-        $cutoff = Carbon::now()->subHours(2);
+        // What SeAT stored in the last 2 hours, sent no longer ago than
+        // Manager Core keeps. ESI sometimes serves a notification hours late,
+        // and SeAT stores it when it gets it, so going by when CCP sent it
+        // would miss those.
+        $clock = Carbon::now();
+        $recent = $clock->copy()->subHours(2);
+        $oldest = $clock->copy()->subSeconds(
+            $clock->getTimestamp() - NotificationAge::intakeCutoff($clock->getTimestamp(), EsiNotification::archiveSince())
+        );
 
-        $seatNotifications = DB::table('character_notifications')
-            ->whereIn('type', $registeredTypes)
-            ->where('timestamp', '>=', $cutoff)
-            ->orderBy('timestamp', 'desc')
+        // SeAT stores a copy of a notification for every character that got
+        // it, dozens of copies of one structure alert, and most of them are
+        // ones we already hold. So the limit counts notifications we don't
+        // hold yet, one copy each (the one with the lowest id). Counting rows
+        // let copies of old ones fill the window and push a new one out of
+        // it. Not a GROUP BY: MariaDB answers that by walking the whole
+        // notification_id index, several times slower than this table scan.
+        $seatNotifications = DB::table('character_notifications as cn')
+            ->whereIn('cn.type', $registeredTypes)
+            ->where(function ($stored) use ($recent) {
+                // SeAT sets created_at on every copy it saves; the timestamp
+                // still counts for a row that has none.
+                $stored->where('cn.created_at', '>=', $recent)
+                    ->orWhere('cn.timestamp', '>=', $recent);
+            })
+            ->where('cn.timestamp', '>=', $oldest)
+            ->whereNotExists(function ($held) {
+                $held->select(DB::raw(1))
+                    ->from('manager_core_esi_notifications as mc')
+                    ->whereColumn('mc.notification_id', 'cn.notification_id');
+            })
+            ->whereNotExists(function ($earlier) {
+                $earlier->select(DB::raw(1))
+                    ->from('character_notifications as earlier')
+                    ->whereColumn('earlier.notification_id', 'cn.notification_id')
+                    ->whereColumn('earlier.id', '<', 'cn.id');
+            })
+            ->orderBy('cn.timestamp', 'desc')
             ->limit(200)
             ->get();
 
         if ($seatNotifications->isEmpty()) {
-            Log::debug('SweepSeatNotifications: No relevant notifications in SeAT table within 2h window');
+            Log::debug('SweepSeatNotifications: No new notifications in SeAT table stored in the last 2h');
             return;
         }
 
@@ -83,11 +116,6 @@ class SweepSeatNotifications implements ShouldQueue
 
         foreach ($seatNotifications as $seatNotif) {
             $notificationId = $seatNotif->notification_id;
-
-            // Dedup against the shared MC table
-            if (EsiNotification::notificationExists((int) $notificationId)) {
-                continue;
-            }
 
             // Resolve corporation_id from character_affiliations
             $corporationId = DB::table('character_affiliations')
@@ -103,7 +131,8 @@ class SweepSeatNotifications implements ShouldQueue
                 $parsedData = ['raw' => $rawText];
             }
 
-            // Insert as fallback source. Catch duplicate key races.
+            // Insert as fallback source. Catch duplicate key races: the
+            // fast-poll may have stored it since the query above ran.
             try {
                 EsiNotification::create([
                     'notification_id' => $notificationId,
@@ -120,7 +149,9 @@ class SweepSeatNotifications implements ShouldQueue
                 ]);
 
                 $newCount++;
-                Log::info("SweepSeatNotifications: Picked up {$seatNotif->type} #{$notificationId} (fallback)");
+                $late = $clock->getTimestamp() - Carbon::parse($seatNotif->timestamp)->getTimestamp();
+                Log::info("SweepSeatNotifications: Picked up {$seatNotif->type} #{$notificationId} (fallback)"
+                    . ($late > NotificationAge::DEFAULT_HOURS * 3600 ? sprintf(', sent %.1f h ago', $late / 3600) : ''));
             } catch (\Illuminate\Database\QueryException $e) {
                 if (str_contains($e->getMessage(), 'Duplicate entry') || str_contains($e->getMessage(), 'UNIQUE constraint')) {
                     continue;
@@ -132,8 +163,9 @@ class SweepSeatNotifications implements ShouldQueue
         Log::info("SweepSeatNotifications: Done. New fallback notifications: {$newCount}");
 
         // NOTE: undispatched notifications from the sweep will be picked up by the next
-        // PollEsiNotifications cycle (every 2 min), which handles dispatching to registered
-        // handlers with proper DB locking. We don't dispatch here to avoid concurrency issues.
+        // PollEsiNotifications cycle (every 2 min, key holders or not), which handles
+        // dispatching to registered handlers with proper DB locking. We don't dispatch
+        // here to avoid concurrency issues.
     }
 
     /**

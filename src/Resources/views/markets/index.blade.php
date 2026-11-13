@@ -97,7 +97,11 @@
                                     @if($market->last_refresh_status === \ManagerCore\Models\Market::STATUS_OK)
                                         <span class="mk-status-ok"><i class="fas fa-check-circle"></i> OK</span>
                                     @else
-                                        <span class="mk-status-err"><i class="fas fa-exclamation-circle"></i> {{ $market->last_refresh_status }}</span>
+                                        <span class="mk-status-err"
+                                              data-toggle="tooltip"
+                                              title="{{ $market->last_refresh_error }}">
+                                            <i class="fas fa-exclamation-circle"></i> {{ $market->last_refresh_status }}
+                                        </span>
                                     @endif
                                 @else
                                     <span class="mk-meta">never</span>
@@ -134,25 +138,27 @@
         </div>
     </div>
 
-    {{-- Citadel markets — pre-seeded Goonpraisal-backed entries.
-
-         "Add Custom Market" hidden in v1.0.0: custom citadel markets only
-         work if Goonpraisal has a slug for them. Until Janice slug
-         expansion + Adam4EVE provider ship, the 7 pre-seeded markets are
-         the entire surface — operators just toggle them on. --}}
+    {{-- Citadel markets: the seven pre-seeded Goonpraisal-backed entries,
+         plus any structure the operator adds to be read through ESI. --}}
     <div class="card card-dark mt-4">
         <div class="card-header">
             <h3 class="card-title">
-                <i class="fas fa-industry"></i> Citadel Markets (Goonpraisal-backed)
+                <i class="fas fa-industry"></i> Citadel Markets
             </h3>
+            <div class="card-tools">
+                <a href="{{ route('manager-core.markets.create') }}" class="btn btn-sm btn-mc-primary">
+                    <i class="fas fa-plus"></i> Add Market
+                </a>
+            </div>
         </div>
         <div class="card-body">
             <p class="text-muted">
-                Seven pre-seeded nullsec citadel markets, all backed by
-                <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a>. All disabled
-                by default — flip <em>Disabled</em> to <em>Enabled</em> on the rows your alliance trades
-                at, click <em>Test</em> to verify the provider responds, then point consumer plugins at
-                the market via <a href="{{ route('manager-core.pricing-preferences.index') }}">Pricing Preferences</a>.
+                Seven pre-seeded nullsec markets backed by
+                <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a>, all disabled
+                by default, plus any structure you add with <em>Add Market</em> to be read straight from
+                ESI. Enable the rows your alliance trades at, click <em>Test</em> to check the market can be
+                read, then point consumer plugins at it via
+                <a href="{{ route('manager-core.pricing-preferences.index') }}">Pricing Preferences</a>.
             </p>
 
             @if($citadels->isEmpty())
@@ -254,14 +260,24 @@
                                             <i class="fas fa-vial"></i> Test
                                         </button>
                                     </form>
-                                    {{-- Edit + Delete hidden in v1.0.0: the
-                                         seven citadel rows are pre-seeded
-                                         immutable Goonpraisal targets. Editing
-                                         them risks the operator changing the
-                                         slug to something Goonpraisal doesn't
-                                         track, then quietly falling back to
-                                         Jita. Re-enable once we surface
-                                         additional providers + slugs. --}}
+                                    {{-- The seven pre-seeded rows stay fixed
+                                         Goonpraisal targets: a changed slug
+                                         that Goonpraisal doesn't track would
+                                         quietly fall back to Jita. Markets the
+                                         operator added can be edited. --}}
+                                    @if($market->is_custom)
+                                        <a href="{{ route('manager-core.markets.edit', $market->id) }}" class="btn btn-sm btn-outline-secondary">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </a>
+                                        <form method="POST" action="{{ route('manager-core.markets.destroy', $market->id) }}" style="display:inline;"
+                                              onsubmit="return confirm('Delete this market?');">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </form>
+                                    @endif
                                 </td>
                             </tr>
                         @endforeach
@@ -278,32 +294,35 @@
         </div>
         <div class="card-body">
             <p>
-                Citadel markets are priced via a <strong>third-party appraisal service</strong>, not by
-                scraping ESI directly. CCP's <code>/markets/structures/{id}/</code> endpoint has
-                unfixable pagination problems on large nullsec hubs (pages 2..N return identical content
-                to page 1, capping reachable orders at ~1000 of ~52,000). MC routes citadel queries
-                through services that have accumulated their own datasets instead.
+                A citadel market is priced one of two ways: read straight from the structure through ESI,
+                or by a <strong>third-party service</strong> that tracks the hub.
+            </p>
+
+            <h5>Read from the structure (MCPraisal / ESI)</h5>
+            <p>
+                Works for any structure a director in the
+                <a href="{{ route('manager-core.esi-key-pool.index') }}">ESI Key Pool</a> can dock at, as long as
+                their token has the <code>esi-markets.structure_markets.v1</code> scope. Click
+                <em>Add Market</em>, keep <em>Citadel</em> and <em>MCPraisal (ESI)</em>, and put the structure ID in
+                the slug field; the name, system and region come from SeAT.
+            </p>
+            <p>
+                ESI can't filter a structure's market by item, so each refresh reads the whole market once
+                (one request per 1,000 orders, so a 50,000-order Keepstar takes about 50) and prices every
+                item plugins subscribe to from that one read. A read is reused for 15 minutes, and a failed
+                one keeps the cached prices.
             </p>
 
             <h5>Pre-seeded Goonpraisal markets</h5>
             <p>
-                v1.0.0 ships with seven Goonpraisal-backed nullsec markets:
+                Seven Goonpraisal-backed nullsec markets ship with every install:
                 <strong>Insmother (C-J6MT)</strong>, <strong>Insmother LAWN (GB-6X5)</strong>,
                 <strong>Tenerifis (UALX-3)</strong>, <strong>Catch (HY-RWO)</strong>,
                 <strong>Paragon Soul (O4T-Z5)</strong>, <strong>Esoteria (R-ARKN)</strong>,
-                <strong>Immensea (GM-0K7)</strong>. All disabled by default — flip the toggle on the
+                <strong>Immensea (GM-0K7)</strong>. All disabled by default. Flip the toggle on the
                 row your alliance trades at, click <em>Test</em>, then point consumer plugins at the
                 market via <a href="{{ route('manager-core.pricing-preferences.index') }}">Pricing Preferences</a>.
-            </p>
-
-            <h5>What if my hub isn't in the list?</h5>
-            <p>
-                Adding custom citadel markets is <strong>disabled in v1.0.0</strong> on purpose — without
-                a third-party provider that knows your specific hub, a custom market would silently fall
-                back to Jita. The roadmap covers Janice slug expansion (broader hub coverage) and an
-                Adam4EVE provider (different dataset, different blind spots) to fill this gap. For now,
-                if Goonpraisal doesn't cover your hub, the five canonical EVE hub markets above remain
-                the supported pricing source.
+                They need no ESI token at all.
             </p>
         </div>
     </div>

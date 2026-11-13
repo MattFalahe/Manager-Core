@@ -1,5 +1,5 @@
 {{-- Interactive ecosystem map. Self-contained (scoped to .fm-scope) so it
-     can be @included anywhere: the Help "Plugin Family" tab and the Plugin
+     can be @included anywhere: the Help "Plugins & Ecosystem" tab and the Plugin
      Bridge "Ecosystem simulation" tab both render this one source of truth.
      Pure vanilla JS + SVG, declarative %-coordinates (works even while the
      containing tab is hidden), wrapped in try/catch (enhancement-only). --}}
@@ -125,7 +125,7 @@
                 { f:'sm', t:'mm', mc:true, k:'data', l:'extraction at-risk / lost alerts when a structure is attacked' },
                 { f:'sm', t:'pings', mc:true, k:'data', l:'structure timers on the fleet calendar' },
                 { f:'mm', t:'pings', mc:true, k:'data', l:'mining extractions on the FC opportunities board' },
-                { f:'mc', t:'sm', mc:true, k:'data', l:'two of its three ESI detection paths: the ~2 minute Manager Core fast-poll and the ~10 minute MC sweep both ride on MC\'s shared director key pool. Without them, structure attack / reinforcement-timer / fuel alerts fall back to the native ~15-20 minute sweep, so the most time-critical notifications often arrive too late to act on' },
+                { f:'mc', t:'sm', mc:true, k:'data', l:'two of its three ESI detection paths: the ~2 minute Manager Core fast-poll, which rides on MC\'s shared director key pool, and MC\'s sweep of SeAT\'s notifications every minute. Without them, structure attack / reinforcement-timer / fuel alerts fall back to the native ~15-20 minute sweep, so the most time-critical notifications often arrive too late to act on' },
                 { f:'mc', t:'mm', mc:true, k:'data', l:'centralised ore pricing (falls back to local price sources)' },
                 { f:'mc', t:'bb', mc:true, k:'data', l:'Manager Core pricing for appraisals (falls back to its own chain)' },
                 { f:'price', t:'mc', mc:false, k:'data', l:'the optional seat-prices source in the pricing chain (Mining and Buyback price through it)' },

@@ -4,6 +4,7 @@ namespace ManagerCore\Services\PriceProviders;
 
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Collection;
+use ManagerCore\Models\Market;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 
@@ -12,6 +13,8 @@ use ManagerCore\Models\PriceHistory;
  */
 class SeatPriceProvider implements PriceProviderInterface
 {
+    use ReportsFetchFailures;
+
     /**
      * Get prices for given type IDs using SeAT's price provider system
      *
@@ -21,10 +24,16 @@ class SeatPriceProvider implements PriceProviderInterface
      */
     public function getPrices(array $typeIds, string $market, bool $persist = true): array
     {
+        $this->resetFetchFailures();
         $out = array_fill_keys(array_map('intval', $typeIds), null);
+
+        if (empty($typeIds)) {
+            return $out;
+        }
 
         if (!$this->isAvailable()) {
             Log::warning("[Manager Core] SeAT Price Provider is not available");
+            $this->recordFetchFailure(array_keys($out), 'SeAT Price Provider is not set up', false);
             return $out;
         }
 
@@ -35,6 +44,7 @@ class SeatPriceProvider implements PriceProviderInterface
             $priceProvider = $this->getPriceProviderInstance();
             if (!$priceProvider) {
                 Log::error("[Manager Core] Failed to get price provider instance");
+                $this->recordFetchFailure(array_keys($out), 'SeAT Price Provider could not be loaded', false);
                 return $out;
             }
 
@@ -85,6 +95,7 @@ class SeatPriceProvider implements PriceProviderInterface
             Log::error("[Manager Core] Error fetching prices from SeAT provider: " . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
+            $this->recordFetchFailure(array_keys($out), 'SeAT Price Provider: ' . $e->getMessage(), true, Market::STATUS_PROVIDER_DOWN);
             return $out;
         }
     }
@@ -204,8 +215,9 @@ class SeatPriceProvider implements PriceProviderInterface
     /**
      * Update daily price history from SeAT provider data
      *
-     * SeAT providers return a single price, so we store it as both buy/sell
-     * depending on the provider configuration.
+     * SeAT providers return a single price, stored on the buy or the sell
+     * side depending on the provider configuration. The other side is left
+     * as the day's row has it rather than zeroed.
      *
      * @param Collection $items
      * @param string $market
@@ -213,30 +225,18 @@ class SeatPriceProvider implements PriceProviderInterface
      */
     protected function updatePriceHistory(Collection $items, string $market)
     {
-        $date = now()->toDateString();
         $isBuy = config('prices-core.providers.' . config('prices-core.default') . '.is_buy', false);
 
         foreach ($items as $item) {
-            $price = $item->getPrice();
-            $typeId = $item->getTypeID();
+            $price = (float) $item->getPrice();
 
-            if ($price === null || $price <= 0) {
-                continue;
-            }
-
-            PriceHistory::updateOrCreate(
-                [
-                    'type_id' => $typeId,
-                    'market' => $market,
-                    'date' => $date,
-                ],
-                [
-                    'avg_buy' => $isBuy ? $price : 0,
-                    'avg_sell' => $isBuy ? 0 : $price,
-                    'max_buy' => $isBuy ? $price : 0,
-                    'min_sell' => $isBuy ? 0 : $price,
-                    'total_volume' => 0,
-                ]
+            PriceHistory::recordDay(
+                (int) $item->getTypeID(),
+                $market,
+                $isBuy ? $price : 0.0,
+                $isBuy ? $price : 0.0,
+                $isBuy ? 0.0 : $price,
+                $isBuy ? 0.0 : $price
             );
         }
     }

@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool hasPlugin(string $pluginName)
  * @method static array|null getPlugin(string $pluginName)
  * @method static array getPlugins()
+ * @method static array getExternalPlugins()
  * @method static void registerCapability(string $pluginName, string $capability, callable $handler)
  * @method static bool hasCapability(string $pluginName, string $capability)
  * @method static mixed call(string $pluginName, string $capability, ...$args)

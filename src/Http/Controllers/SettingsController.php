@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Seat\Web\Http\Controllers\Controller;
 use ManagerCore\Models\Setting;
 use ManagerCore\Models\Market;
+use ManagerCore\Services\PricingService;
 use ManagerCore\Services\Watchdog\WatchdogService;
 
 class SettingsController extends Controller
@@ -37,6 +38,7 @@ class SettingsController extends Controller
             'auto_discovery' => Setting::get('bridge.auto_discover', Setting::get('bridge.auto_discovery', true)),
             'janice_api_key' => Setting::get('pricing.janice_api_key', config('manager-core.pricing.janice.api_key', '')),
             'goonpraisal_contact_email' => Setting::get('pricing.goonpraisal_contact_email', config('manager-core.pricing.goonpraisal.contact_email', 'mattfalahe@gmail.com')),
+            'fallback_provider' => Setting::get(PricingService::FALLBACK_SETTING, PricingService::FALLBACK_DEFAULT),
         ];
 
         // Get available SeAT price providers
@@ -92,6 +94,7 @@ class SettingsController extends Controller
             // encouraged to set their own so Goonpraisal can reach the
             // actual person if there's ever a problem with their queries.
             'goonpraisal_contact_email' => 'nullable|email|max:255',
+            'fallback_provider' => 'nullable|in:' . implode(',', array_merge(PricingService::FALLBACK_PROVIDERS, [PricingService::FALLBACK_NONE])),
         ]);
 
         // H8: explicit list of setting keys we write — kept aligned with the readers
@@ -111,6 +114,7 @@ class SettingsController extends Controller
             'bridge.auto_discover'          => $request->boolean('auto_discovery'),
             'pricing.janice_api_key'        => $request->input('janice_api_key', ''),
             'pricing.goonpraisal_contact_email' => $request->input('goonpraisal_contact_email', 'mattfalahe@gmail.com'),
+            PricingService::FALLBACK_SETTING => $request->input('fallback_provider') ?: PricingService::FALLBACK_DEFAULT,
         ];
 
         $groups = [
@@ -121,6 +125,7 @@ class SettingsController extends Controller
             'bridge.auto_discover' => 'bridge',
             'pricing.janice_api_key' => 'pricing',
             'pricing.goonpraisal_contact_email' => 'pricing',
+            PricingService::FALLBACK_SETTING => 'pricing',
         ];
 
         foreach ($writes as $key => $value) {
@@ -135,6 +140,12 @@ class SettingsController extends Controller
                 $oldValue = null;
             }
             \ManagerCore\Models\SettingsAudit::record($key, $oldValue, $value, 'settings_ui');
+
+            // Janice has not turned a new key away yet, so the last refusal
+            // stops describing it the moment the key changes.
+            if ($key === 'pricing.janice_api_key' && $oldValue !== $value) {
+                Setting::remove(\ManagerCore\Services\PriceProviders\JanicePriceProvider::STATUS_KEY);
+            }
         }
 
         // H5: clear bridge discovery cache since auto_discover or related state may have changed

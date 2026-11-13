@@ -264,8 +264,7 @@
             {{-- Dark-theme styling for <pre>/<code> comes from the
                  page-scoped <style> in @push('head') above. Default
                  Bootstrap/SeAT light-mode coloring rendered dark-on-dark
-                 here — recurring contrast issue per
-                 feedback_help_docs_visual_design.md rule #3. --}}
+                 here. --}}
             <pre>Authorization: Bearer mc_your_token_here
 X-Api-Token: mc_your_token_here</pre>
 

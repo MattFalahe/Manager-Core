@@ -7,7 +7,6 @@ use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Log;
 use ManagerCore\Console\Commands\UpdateMarketPricesCommand;
 use ManagerCore\Console\Commands\CleanupOldPricesCommand;
-use ManagerCore\Console\Commands\DiagnosePluginBridgeCommand;
 use ManagerCore\Console\Commands\DiagnoseBridgeCommand;
 use ManagerCore\Helpers\EveFormatting;
 use ManagerCore\Database\Seeders\ScheduleSeeder;
@@ -41,7 +40,6 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
             $this->commands([
                 UpdateMarketPricesCommand::class,
                 CleanupOldPricesCommand::class,
-                DiagnosePluginBridgeCommand::class,
                 DiagnoseBridgeCommand::class,
                 \ManagerCore\Console\Commands\DiagnoseCommand::class,
                 \ManagerCore\Console\Commands\DiagnoseESICommand::class,
@@ -510,11 +508,11 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
 
             // D8: Bridge introspection — consumers can ask "what capabilities
             // does this MC version expose?" without hardcoding capability
-            // names. Returns [pluginKey => [capability1, capability2, ...]].
+            // names. Returns [pluginKey => [capability1, capability2, ...]]:
+            // what the registry stored, plus what this process registered,
+            // which is the only place Manager Core's own are kept.
             $bridge->registerCapability('ManagerCore', 'bridge.discoverCapabilities', function (?string $pluginKey = null) use ($bridge): array {
-                $stats = $bridge->getStatistics();
                 $capabilities = [];
-                // Reflect from the in-memory map via PluginRegistry (best-effort)
                 try {
                     $query = \ManagerCore\Models\PluginRegistry::query();
                     if ($pluginKey !== null) {
@@ -524,7 +522,11 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
                         $capabilities[$row->plugin_name] = $row->capabilities ?? [];
                     }
                 } catch (\Throwable $e) {
-                    // PluginRegistry table missing — return empty
+                    // PluginRegistry table missing: memory alone
+                }
+                foreach ($bridge->registeredCapabilityNames($pluginKey) as $plugin => $names) {
+                    $stored = $capabilities[$plugin] ?? [];
+                    $capabilities[$plugin] = array_values(array_unique(array_merge(is_array($stored) ? $stored : [], $names)));
                 }
                 return $capabilities;
             });

@@ -4,6 +4,7 @@ namespace ManagerCore\Services\PriceProviders;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use ManagerCore\Models\Market;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 use ManagerCore\Models\Setting;
@@ -57,6 +58,8 @@ use Seat\Eveapi\Models\Sde\InvType;
  */
 class GoonpraisalPriceProvider implements PriceProviderInterface
 {
+    use ReportsFetchFailures;
+
     private const BASE_URL = 'https://appraise.gnf.lt';
     private const ENDPOINT = '/appraisal.json';
 
@@ -78,9 +81,9 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
      *     the region or constellation name as I'd initially guessed.
      *
      * The MC seed migration (000009) pre-creates citadel markets with
-     * the correct provider_slug already set. This list is the fallback
-     * lookup for ad-hoc operator-configured markets that pass the slug
-     * directly as the MC market key.
+     * the correct provider_slug already set. This list is the lookup for
+     * a market keyed by the slug itself, and for a citadel market read
+     * some other way, whose system can name its Goonpraisal market.
      */
     private const SUPPORTED_SLUGS = [
         'jita',
@@ -98,20 +101,17 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
 
     public function getPrices(array $typeIds, string $market, bool $persist = true): array
     {
+        $this->resetFetchFailures();
         $out = array_fill_keys(array_map('intval', $typeIds), null);
 
         if (empty($typeIds)) {
             return $out;
         }
 
-        // Resolve the Goonpraisal slug for this market. Prefer the
-        // explicit provider_slug from manager_core_markets; fall back
-        // to the market key itself only if it's a known Goonpraisal
-        // slug (handles operator-configured hub markets that pass
-        // 'jita' directly).
-        $slug = $this->resolveSlug($market);
+        $slug = static::marketSlug($market);
         if ($slug === null) {
             Log::warning("[Manager Core] Goonpraisal: market '{$market}' has no Goonpraisal slug configured; provider returning no data");
+            $this->recordFetchFailure(array_keys($out), "Goonpraisal has no market for '{$market}'", false);
             return $out;
         }
 
@@ -135,6 +135,10 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
         $updatedCount = 0;
 
         foreach (array_chunk($typeNames, self::BATCH_SIZE, true) as $batchIndex => $batch) {
+            if ($batchIndex > 0) {
+                $this->pause(self::INTER_BATCH_PAUSE_USEC);
+            }
+
             try {
                 $body = implode("\n", array_values($batch));
 
@@ -150,12 +154,14 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
 
                 if (!$response->successful()) {
                     Log::warning("[Manager Core] Goonpraisal batch {$batchIndex} HTTP " . $response->status() . ": " . substr($response->body(), 0, 200));
+                    $this->recordFetchFailure(array_keys($batch), 'Goonpraisal returned HTTP ' . $response->status(), true, Market::STATUS_PROVIDER_DOWN);
                     continue;
                 }
 
                 $data = $response->json();
                 if (!is_array($data) || !isset($data['appraisal']['items'])) {
                     Log::warning("[Manager Core] Goonpraisal batch {$batchIndex} response missing appraisal.items");
+                    $this->recordFetchFailure(array_keys($batch), 'Goonpraisal returned something other than an appraisal', true, Market::STATUS_PROVIDER_DOWN);
                     continue;
                 }
 
@@ -175,11 +181,8 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
                 }
             } catch (\Throwable $e) {
                 Log::error("[Manager Core] Goonpraisal batch {$batchIndex} threw: " . $e->getMessage());
+                $this->recordFetchFailure(array_keys($batch), 'Goonpraisal: ' . $e->getMessage(), true, Market::STATUS_PROVIDER_DOWN);
                 continue;
-            }
-
-            if ($batchIndex < count($typeNames) - 1) {
-                usleep(self::INTER_BATCH_PAUSE_USEC);
             }
         }
 
@@ -228,31 +231,42 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
     }
 
     /**
-     * Resolve the Goonpraisal market slug for an MC market key.
+     * Goonpraisal's name for an MC market, or null when it has none.
      *
      * Priority:
-     *   1. manager_core_markets.provider_slug on the matching row
+     *   1. provider_slug on a market routed through Goonpraisal
      *   2. The market key itself if it's a known Goonpraisal slug
-     *
-     * Returns null when neither matches — caller logs + bails.
+     *   3. For a citadel market read some other way, its system: Goonpraisal
+     *      names its citadel markets after their system, which is what lets
+     *      it stand in for a structure read through ESI.
      */
-    protected function resolveSlug(string $marketKey): ?string
+    public static function marketSlug(string $marketKey): ?string
     {
         try {
-            $row = \DB::table('manager_core_markets')
-                ->where('key', $marketKey)
-                ->where('provider', 'goonpraisal')
-                ->first(['provider_slug']);
-            if ($row && !empty($row->provider_slug)) {
-                return $row->provider_slug;
-            }
+            $row = Market::where('key', $marketKey)->first();
         } catch (\Throwable $e) {
-            // Table missing during install? Try the fallback path.
+            // Table missing during install: the key alone can still match.
+            $row = null;
         }
+
+        if ($row && $row->provider === 'goonpraisal' && !empty($row->provider_slug)) {
+            return $row->provider_slug;
+        }
+
         if (in_array($marketKey, self::SUPPORTED_SLUGS, true)) {
             return $marketKey;
         }
-        return null;
+
+        $system = $row && $row->market_type === Market::TYPE_CITADEL
+            ? strtoupper(trim((string) $row->system_name))
+            : '';
+
+        return $system !== '' && in_array($system, self::SUPPORTED_SLUGS, true) ? $system : null;
+    }
+
+    protected function pause(int $microseconds): void
+    {
+        usleep($microseconds);
     }
 
     /**
@@ -350,26 +364,14 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
 
     protected function updateHistory(int $typeId, string $market, ?array $buy, ?array $sell): void
     {
-        $date = now()->toDateString();
-        $avgBuy  = $buy  ? (float) ($buy['avg']  ?? 0) : 0;
-        $avgSell = $sell ? (float) ($sell['avg'] ?? 0) : 0;
-        $maxBuy  = $buy  ? (float) ($buy['max']  ?? 0) : 0;
-        $minSell = $sell ? (float) ($sell['min'] ?? 0) : 0;
-        $vol     = (int)  (($buy['volume'] ?? 0) + ($sell['volume'] ?? 0));
-
-        PriceHistory::updateOrCreate(
-            [
-                'type_id' => $typeId,
-                'market'  => $market,
-                'date'    => $date,
-            ],
-            [
-                'avg_buy'      => $avgBuy,
-                'avg_sell'     => $avgSell,
-                'max_buy'      => $maxBuy,
-                'min_sell'     => $minSell,
-                'total_volume' => $vol,
-            ]
+        PriceHistory::recordDay(
+            $typeId,
+            $market,
+            $buy  ? (float) ($buy['avg']  ?? 0) : 0.0,
+            $buy  ? (float) ($buy['max']  ?? 0) : 0.0,
+            $sell ? (float) ($sell['avg'] ?? 0) : 0.0,
+            $sell ? (float) ($sell['min'] ?? 0) : 0.0,
+            (int) (($buy['volume'] ?? 0) + ($sell['volume'] ?? 0))
         );
     }
 

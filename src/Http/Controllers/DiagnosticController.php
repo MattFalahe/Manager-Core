@@ -17,10 +17,12 @@ use ManagerCore\Models\EventSubscription;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
 use ManagerCore\Models\PluginRegistry;
+use ManagerCore\Models\PricingPreference;
 use ManagerCore\Models\Setting;
 use ManagerCore\Models\TypeSubscription;
 use ManagerCore\Services\EventBus;
 use ManagerCore\Services\PluginBridge;
+use ManagerCore\Services\PriceProviders\JanicePriceProvider;
 use ManagerCore\Services\PricingService;
 use ManagerCore\Services\SdeService;
 use ManagerCore\Services\Watchdog\WatchdogService;
@@ -50,13 +52,23 @@ class DiagnosticController extends Controller
             try { return $query(); } catch (\Exception $e) { return $default; }
         };
 
+        // Fresh discovery, as on the Plugin Bridge page: the map cached at boot
+        // is often built before later plugins have registered their ESI handlers.
+        $this->bridge->discover(true);
+        $externalPlugins = $this->bridge->getExternalPlugins();
+        $discovered = $this->bridge->getPlugins() + $externalPlugins;
+
         $summary = [
             'price_records' => $safe(fn() => MarketPrice::count()),
             'unique_types' => $safe(fn() => MarketPrice::distinct('type_id')->count('type_id')),
             'subscriptions' => $safe(fn() => TypeSubscription::count()),
             'subscribing_plugins' => $safe(fn() => TypeSubscription::distinct('plugin_name')->count('plugin_name')),
-            'active_plugins' => $safe(fn() => PluginRegistry::where('is_active', true)->count()),
-            'total_plugins' => count(config('manager-core.bridge.compatible_plugins', [])),
+            // Both numbers cover the same plugins: the suite plus the outside
+            // plugins that registered themselves. Counting registry rows over
+            // the size of compatible_plugins let outside plugins push the first
+            // number past the second.
+            'active_plugins' => count(array_filter($discovered, fn ($p) => ($p['status'] ?? '') === 'active')),
+            'total_plugins' => count(config('manager-core.bridge.compatible_plugins', [])) + count($externalPlugins),
             'event_subscriptions' => $safe(fn() => EventSubscription::active()->count()),
             'events_today' => $safe(fn() => EventLog::where('created_at', '>=', now()->startOfDay())->count()),
             'api_tokens' => $safe(fn() => ApiToken::where('is_active', true)->count()),
@@ -75,7 +87,7 @@ class DiagnosticController extends Controller
         // diagnostics too, not just hide them.
         $markets = Market::getEffectiveMarkets(false);
 
-        return view('manager-core::diagnostic.index', compact('summary', 'plugins', 'markets'));
+        return view('manager-core::diagnostic.index', compact('summary', 'plugins', 'externalPlugins', 'markets'));
     }
 
     /**
@@ -120,8 +132,21 @@ class DiagnosticController extends Controller
      */
     public function testPluginConnection(string $pluginKey): JsonResponse
     {
+        // Fresh discovery, as on the Plugin Bridge page: the map cached at boot
+        // is often built before later plugins have registered their ESI handlers.
+        $this->bridge->discover(true);
+
+        return $this->pluginConnectionResult($pluginKey);
+    }
+
+    /**
+     * One plugin's connection test, against the bridge's current discovery.
+     */
+    private function pluginConnectionResult(string $pluginKey): JsonResponse
+    {
         $start = microtime(true);
-        $config = config("manager-core.bridge.compatible_plugins.{$pluginKey}");
+        $external = $this->bridge->getExternalPlugins()[$pluginKey] ?? null;
+        $config = config("manager-core.bridge.compatible_plugins.{$pluginKey}") ?? $external;
 
         if (!$config) {
             return response()->json([
@@ -155,7 +180,7 @@ class DiagnosticController extends Controller
             $result['issues'][] = "Service provider class not found: {$config['class']}";
         } else {
             // Check bridge registration
-            $bridgePlugin = $this->bridge->getPlugin($pluginKey);
+            $bridgePlugin = $this->bridge->getPlugin($pluginKey) ?? $external;
             $result['bridge_registered'] = $bridgePlugin !== null;
 
             if (!$result['bridge_registered']) {
@@ -209,11 +234,14 @@ class DiagnosticController extends Controller
      */
     public function testAllPlugins(): JsonResponse
     {
-        $plugins = config('manager-core.bridge.compatible_plugins', []);
+        // One fresh discovery for the whole run (see testPluginConnection).
+        $this->bridge->discover(true);
+
+        $plugins = config('manager-core.bridge.compatible_plugins', []) + $this->bridge->getExternalPlugins();
         $results = [];
 
         foreach ($plugins as $key => $config) {
-            $response = $this->testPluginConnection($key);
+            $response = $this->pluginConnectionResult($key);
             $data = json_decode($response->getContent(), true);
             $results[$key] = $data['data'] ?? ['status' => 'error'];
         }
@@ -762,29 +790,22 @@ class DiagnosticController extends Controller
      *     other plugins, the REST API, custom scripts, etc.)
      *   - Whether MC's own capability surface is complete
      *
-     * Cross-references in-memory + persisted (PluginRegistry) capabilities so
-     * a plugin that registered capabilities this request but isn't yet in the
-     * registry still shows up.
+     * bridge.discoverCapabilities covers both what this request registered
+     * and what the registry stored, so a plugin with no registry row yet
+     * still shows up, and so does Manager Core, which never has one.
      */
     public function capabilitiesOverview(): JsonResponse
     {
-        $persisted = [];
+        $registered = [];
         try {
-            $persisted = $this->bridge->call('ManagerCore', 'bridge.discoverCapabilities') ?? [];
+            $registered = $this->bridge->call('ManagerCore', 'bridge.discoverCapabilities') ?? [];
         } catch (\Throwable $e) {
-            $persisted = [];
+            $registered = [];
         }
 
-        // Also reflect from getStatistics() for in-memory-only state
-        $stats = $this->bridge->getStatistics();
-        $inMemoryByPlugin = [];
-        foreach ($stats['plugins'] ?? [] as $pluginKey => $pluginInfo) {
-            $inMemoryByPlugin[$pluginKey] = []; // statistics doesn't carry capability names; covered by $persisted
-        }
-
-        // Union — keep one entry per plugin with capability names sorted
+        // One entry per plugin with capability names sorted
         $byPlugin = [];
-        foreach ($persisted as $plugin => $caps) {
+        foreach ($registered as $plugin => $caps) {
             $caps = is_array($caps) ? $caps : [];
             sort($caps);
             $byPlugin[$plugin] = [
@@ -1143,10 +1164,25 @@ class DiagnosticController extends Controller
                 return ['status' => 'fail', 'message' => 'Market(s) using unknown provider: ' . implode(', ', $unknownProviders)];
             }
 
+            // A plugin's provider override reaches Janice without any market
+            // routing through it.
+            if (!$needsJaniceKey) {
+                $needsJaniceKey = PricingPreference::where('provider_override', 'janice')->exists();
+            }
+
             if ($needsJaniceKey) {
                 $key = Setting::get('pricing.janice_api_key') ?? config('manager-core.pricing.janice.api_key');
                 if (empty($key)) {
-                    return ['status' => 'fail', 'message' => 'A market routes through Janice but no API key is configured. Set it at Settings → Pricing.'];
+                    return ['status' => 'fail', 'message' => 'A market or a plugin override routes through Janice but no API key is configured. Set it at Settings → Pricing.'];
+                }
+
+                // A key can be set and still be turned away.
+                $failure = JanicePriceProvider::lastFailure();
+                if ($failure !== null) {
+                    $since = $failure['since'] ? Carbon::parse($failure['since'])->utc()->format('Y-m-d H:i') . ' UTC' : 'its last fetch';
+                    return $failure['state'] === 'refused'
+                        ? ['status' => 'fail', 'message' => ($failure['error'] ?? 'Janice refused the request') . ", since {$since}. Prices it should fetch come from the fallback provider or keep their cached value. Fix the key at Settings → Pricing, then test Janice on the Price Providers tab."]
+                        : ['status' => 'warn', 'message' => "Every request of Janice's last fetch failed, since {$since}. Prices it should fetch come from the fallback provider or keep their cached value until it answers again.", 'detail' => $failure['error'] ?? null];
                 }
             }
 
@@ -1200,10 +1236,13 @@ class DiagnosticController extends Controller
         // 10. Forensic log retention
         $add('Forensic log retention', 'Maintenance', function () {
             $retention = (int) config('manager-core.events.event_log_retention_days', 30);
-            $old = EventLog::where('created_at', '<', now()->subDays($retention))->count();
+            // The cleanup runs once a day, so rows that crossed the line since
+            // its last run are expected. Only a row a full day past it means
+            // the cleanup isn't running.
+            $old = EventLog::where('created_at', '<', now()->subDays($retention + 1))->count();
             return $old === 0
                 ? ['status' => 'pass', 'message' => "Event log is within its {$retention}-day retention window."]
-                : ['status' => 'warn', 'message' => "{$old} event-log row(s) older than the {$retention}-day retention — is manager-core:cleanup-events scheduled?"];
+                : ['status' => 'warn', 'message' => "{$old} event-log row(s) are more than a day past the {$retention}-day retention, so manager-core:cleanup-events hasn't removed them. Check that SeAT's scheduler is running."];
         });
 
         // 11. Failed queue jobs
@@ -1228,9 +1267,25 @@ class DiagnosticController extends Controller
                 return ['status' => 'info', 'message' => 'ESI key pool is empty — fast-poll has no directors to call.'];
             }
             $enabled = DB::table('manager_core_esi_key_holders')->where('enabled', true)->count();
-            return $enabled === 0
-                ? ['status' => 'warn', 'message' => "{$total} key holder(s) registered but none enabled — fast-poll is idle."]
-                : ['status' => 'pass', 'message' => "{$enabled} of {$total} ESI key holder(s) enabled."];
+            if ($enabled === 0) {
+                return ['status' => 'warn', 'message' => "{$total} key holder(s) registered but none enabled, so fast-poll is idle."];
+            }
+
+            // The rotation skips a holder cooling down after failed polls, so
+            // count the ones it can pick, by its own rule.
+            $eligible = \ManagerCore\Models\ESI\EsiKeyHolder::countEligible();
+            if ($eligible === 0) {
+                $back = DB::table('manager_core_esi_key_holders')
+                    ->where('enabled', true)
+                    ->where('suspended_until', '>', Carbon::now())
+                    ->min('suspended_until');
+
+                return ['status' => 'warn', 'message' => "All {$enabled} enabled key holder(s) are cooling down after failed polls, so fast-poll is idle"
+                    . ($back ? ' until ' . Carbon::parse($back)->format('H:i') . ' UTC.' : '.')];
+            }
+
+            return ['status' => 'pass', 'message' => "{$eligible} of {$total} ESI key holder(s) can be polled"
+                . ($eligible < $enabled ? ', ' . ($enabled - $eligible) . ' cooling down after failed polls.' : '.')];
         });
 
         $passed   = count(array_filter($checks, fn($c) => $c['status'] === 'pass'));
@@ -1364,8 +1419,8 @@ class DiagnosticController extends Controller
      * now (ScheduleSeeder hardcodes the expression on every container boot).
      *
      * Parses common cron forms back into minutes (cron-expression literals
-     * spelled out below to avoid the docblock-`*` `/`-terminates-the-block
-     * trap — see feedback_seat_schedule_corrections.md):
+     * spelled out below, since a star followed by a slash would end this
+     * docblock):
      *   - "0 [star][slash]4 [star] [star] [star]" → 240
      *   - "0 [star] [star] [star] [star]"         → 60
      *   - "[star][slash]15 [star] [star] [star] [star]" → 15

@@ -14,24 +14,28 @@ Manager Core is the optional hub that every other plugin in the ecosystem can in
 
 ---
 
-## 🎉 What's in v1.0.2
+## 🎉 What's in v1.1.0: The Ecosystem Era, Market Expansion
 
-**Doctrine-compliance wiring on top of v1.0.1.** Structure Manager's new structure-doctrine compliance feature is now first-class in the ecosystem: MC registers the `structure.doctrine.changed` Topic (the registry is now 60 entries) and the `compliance.getForCorporation` bridge wiring, so HR Manager (in preparation, not yet released) can render per-corp doctrine compliance inside Corp Health once it ships. Plus a Help page accuracy pass: the Connected Plugins descriptions now track each plugin's real Packagist release status, so the released plugins describe what they publish and consume today while the not-yet-released ones (Buyback Manager, HR Manager) are shown as in preparation. Pure additions, no schema or behavior changes. Full details in [CHANGELOG.MD](CHANGELOG.MD).
+**Citadel markets straight from the structure, and prices that hold up when a provider doesn't.** Any structure a director in your ESI Key Pool can dock at can be a market now, read through ESI's structure market endpoint, and you can add your own markets again. When a market's provider fails a refresh, a fallback provider stands in, and whatever nothing can price keeps its last price. Fuzzwork prices each hub from its station instead of its whole region, and Janice prices Amarr.
+
+Notifications ESI serves late still reach the plugins (Manager Core keeps them up to two weeks, and each plugin says how old it takes them), and notifications the sweep finds reach the plugins with nobody in the key pool. The Plugin Bridge page lists plugins from outside the suite that register themselves, the Director Key Pool table filters by corporation and status, and the Watchdog reports a failing Janice key once instead of every hour.
+
+Backwards compatible: one new table (migration 000018), nothing in the existing tables changes. Full details in [CHANGELOG.MD](CHANGELOG.MD).
 
 ### Hub services every plugin can use
 
 | Service | What it gives consumer plugins |
 |---|---|
-| **Pricing Orchestrator** | Per-market provider routing across 5 sources: MCPraisal (ESI region endpoint), Goonpraisal, Janice, Fuzzwork, SeAT prices-core. Operators pick which upstream powers each market. Per-plugin preferences with admin override. **Per-plugin `provider_override`** lets one consumer plugin route through a different provider for the same market (e.g. Mining Manager via Janice for Jita while Structure Manager continues through Fuzzwork). |
+| **Pricing Orchestrator** | Per-market provider routing across 5 sources: MCPraisal (ESI: the region endpoint for hubs, the structure market endpoint for citadels), Goonpraisal, Janice, Fuzzwork, SeAT prices-core. Operators pick which upstream powers each market, and which provider stands in when it fails. Per-plugin preferences with admin override. **Per-plugin `provider_override`** lets one consumer plugin route through a different provider for the same market (e.g. Mining Manager via Janice for Jita while Structure Manager continues through Fuzzwork). |
 | **EventBus** | Pub/sub with idempotency dedup, visibility scoping, Discord-injection sanitization, queued or sync delivery. Topics facade for one-line publishing. |
 | **Plugin Bridge** | Capability registry. Plugins advertise functions, others discover and call them. Worker-registry snapshots for queue-worker visibility. A 6-state detection model (offline / standalone / discovered / partial / full / error) computed entirely from live runtime signals — installed class, registered capabilities, real subscription + pricing rows, recent event traffic, and outbound-publish relationships — drives the ecosystem map and Plugin Connections tab. Nothing about the connections is hardcoded; the only static config is the plugin roster and event-prefix ownership. |
 | **Appraisal System** | go-evepraisal-style parser with group/category SDE classification. Public + private appraisals with secure tokens. |
 | **SDE Helpers** | Centralized type / group / category / icon lookups with cached results. |
-| **ESI Fast-Poll** | Shared key-holder pool for character_notifications polling. ~2 minute detection vs SeAT's native ~20-30 minute sweep. Used by Structure Manager today; any plugin can subscribe. |
+| **ESI Fast-Poll** | Shared key-holder pool for character_notifications polling. ~2 minute detection vs SeAT's native ~20-30 minute sweep. Used by Structure Manager, Mining Manager and HR Manager; any plugin can subscribe. |
 | **REST API** | Token-authenticated endpoints for external dashboards / Discord bots / spreadsheets. Per-token rate limits + append-only audit log. |
 | **Diagnostics UI** | 10-tab web dashboard: pricing, subscriptions, plugin connections, capabilities, event-bus state, API status, cache health, settings, providers, notification testing. |
 | **Watchdog** | Meta-monitoring of MC's own infrastructure. Every 5 minutes runs 5 checks (EventBus failures, price-cron freshness, ESI fast-poll pool health, provider availability, and **plugin updates available on Packagist** with a 7-day per-version cooldown so it doesn't spam — added in v1.0.1) and posts alerts directly to a Discord or Slack webhook (auto-detected from URL pattern). Deliberately decoupled from EventBus so it still works when the bus itself is down. Disabled by default; opt in at Settings → Watchdog. |
-| **Pre-seeded Nullsec Markets** | 7 Goonpraisal-tracked nullsec hubs (C-J6MT, GB-6X5, UALX-3, HY-RWO, O4T-Z5, R-ARKN, GM-0K7) ship dormant on every install. Operator enables and clicks Test to start using. No ESI auth, no structure picker, no citadel-scrape complexity. |
+| **Citadel Markets** | 7 Goonpraisal-tracked nullsec hubs (C-J6MT, GB-6X5, UALX-3, HY-RWO, O4T-Z5, R-ARKN, GM-0K7) ship dormant on every install; enable one and click Test, no ESI token needed. Any other structure a Key Pool director can dock at is added as a market by its structure ID and read through ESI. |
 
 ### Architectural posture
 
@@ -87,16 +91,16 @@ Or visit **Manager Core → Diagnostics** in the SeAT sidebar.
 
 ## 🔌 Compatible plugins
 
-Status as of v1.0.2. Five plugins are released on Packagist and integrate today; **Buyback Manager and HR Manager are in preparation** (MC is already wired for them, but they are not yet released), and Industry Manager is still in development. The Plugin Bridge's 6-state model shows each installed plugin's live wiring on the ecosystem map:
+Status as of v1.1.0. Six plugins are released on Packagist and integrate today; **Buyback Manager is in preparation** (MC is already wired for it, but it is not yet released). Industry Manager and Ratting Manager don't use MC yet. The Plugin Bridge's 6-state model shows each installed plugin's live wiring on the ecosystem map:
 
 | Plugin | Integration state | What it does with MC |
 |---|---|---|
 | [Mining Manager](https://github.com/MattFalahe/mining-manager) | ✅ Active | Publishes `mining.*` events (incl. the `mining.extraction_*` moon lifecycle), consumes `structure.alert.*` for extraction-risk warnings, reads pricing via PluginBridge |
-| [Structure Manager](https://github.com/MattFalahe/Structure-Manager) | ✅ Active | Publishes 9 `structure.alert.*` flavors + `structure_manager.timer.*` + `structure.doctrine.changed`, exposes the `compliance.getForCorporation` capability (for HR Manager, in preparation), registers an ESI notification handler with MC's key pool for ~2 min detection |
-| [Corp Wallet Manager](https://github.com/MattFalahe/Corp-Wallet-Manager) | ✅ Active | Publishes `member.*` milestones + `wallet.*` signals (for HR Manager, in preparation); exposes 16 read-only ratting / contribution / wallet capabilities, incl. (v3.1) a corp financial summary (`wallet.getCorpSummary`) |
+| [Structure Manager](https://github.com/MattFalahe/Structure-Manager) | ✅ Active | Publishes 9 `structure.alert.*` flavors + `structure_manager.timer.*` + `structure.doctrine.changed`, exposes the `compliance.getForCorporation` capability (HR Manager reads it), registers an ESI notification handler with MC's key pool for ~2 min detection |
+| [Corp Wallet Manager](https://github.com/MattFalahe/Corp-Wallet-Manager) | ✅ Active | Publishes `member.*` milestones + `wallet.*` signals (HR Manager subscribes); exposes read-only ratting / contribution / wallet capabilities, incl. a corp financial summary (`wallet.getCorpSummary`) |
 | [SeAT Broadcast](https://github.com/MattFalahe/SeAT-Discord-Pings) (`seat-discord-pings`) | ✅ Active | Subscribes to `structure_manager.timer.*` + `mining.extraction_*` to populate its FC Opportunities board; publishes `pings.broadcast.sent` + `pings.formup.scheduled` |
-| [HR Manager](https://github.com/MattFalahe/HR-Manager) | 🔜 In preparation | Not yet released on Packagist. Once it ships it will subscribe to `mining.*`, `member.*`, `wallet.*`, `blueprint.request.*` for the player classifier, publish its `hr.*` lifecycle catalog, and consume CWM + Structure Manager (`compliance.getForCorporation`, structure compliance inside Corp Health) capabilities. MC's Topics and bridge are already wired for it |
-| [Blueprint Manager](https://github.com/MattFalahe/Blueprint-Manager) | ✅ Active | Publishes `blueprint.request.*` lifecycle events (for HR Manager, in preparation); exposes 2 read-only capabilities |
+| [HR Manager](https://github.com/MattFalahe/HR-Manager) | ✅ Active | Subscribes to `mining.*`, `member.*`, `wallet.*`, `blueprint.request.*`, `structure.alert.*` and `pings.*` for the player classifier, publishes its `hr.application.*` / `hr.player.*` events, and reads Corp Wallet, Blueprint and Structure Manager capabilities (`compliance.getForCorporation` for structure compliance inside Corp Health) |
+| [Blueprint Manager](https://github.com/MattFalahe/Blueprint-Manager) | ✅ Active | Publishes `blueprint.request.*` lifecycle events (HR Manager subscribes); exposes 2 read-only capabilities |
 | [Buyback Manager](https://github.com/MattFalahe/Buyback-Manager) | 🔜 In preparation | Not yet released on Packagist. Once it ships it will read pricing via PluginBridge and publish `buyback.*` offer/contract events. MC already routes pricing for it |
 
 Plugins detect MC at boot via `class_exists(\ManagerCore\Topics::class)`. Installing or uninstalling MC never breaks any plugin — integrations come online or fall back automatically.
@@ -178,7 +182,20 @@ Full developer reference inside **Manager Core → Help → Plugin Bridge / Even
 
 ## ⚡ ESI Fast-Poll (one-paragraph summary)
 
-Manager Core polls EVE Online's ESI `/characters/{id}/notifications/` endpoint directly from admin-assigned director characters and shares the results with every plugin that registers handlers. **Detection drops from SeAT's native ~20-30 minutes to ~2 minutes per corp.** Adaptive per-corp fair LRU rotation means a corp with 1 director gets the same coverage as a corp with 50 — adding more directors of the same corp adds fault tolerance, not speed. Cascade retry on CCP 5xx bursts, auto-recovery on transient token failures, and a 10-minute SeAT-native sweep as a belt-and-braces safety net round out the design.
+Manager Core polls EVE Online's ESI `/characters/{id}/notifications/` endpoint directly from admin-assigned director characters and shares the results with every plugin that registers handlers. **Detection drops from SeAT's native ~20-30 minutes to ~2 minutes per corp.** Adaptive per-corp fair LRU rotation means a corp with 1 director gets the same coverage as a corp with 50 — adding more directors of the same corp adds fault tolerance, not speed. Cascade retry on CCP 5xx bursts, auto-recovery on transient token failures, and a SeAT-native sweep every minute as a belt-and-braces safety net round out the design.
+
+ESI sometimes serves a notification hours late, so Manager Core keeps notifications up to two weeks old, and each plugin says how old it takes them: 2 hours unless it asks for more, 72 hours for moon extraction starts. A plugin asks when it registers its handler:
+
+```php
+app(\ManagerCore\Services\ESI\EsiNotificationRegistry::class)->register(
+    ['StructureLostShields', 'StructureLostArmor'],
+    \MyPlugin\Handlers\TimerHandler::class,
+    'my-plugin',
+    ['max_age_hours' => 48]   // or by type: ['max_age_hours' => ['StructureLostShields' => 48]]
+);
+```
+
+What became of each notification at each plugin (handled, queued, failed, or too old) is kept in `manager_core_esi_notification_deliveries`.
 
 **Detection time at a glance:**
 
@@ -192,7 +209,7 @@ Manager Core polls EVE Online's ESI `/characters/{id}/notifications/` endpoint d
 
 ---
 
-## 📊 Database schema (v1.0.0 — 17 tables)
+## 📊 Database schema (18 tables)
 
 | Table | Purpose |
 |---|---|
@@ -211,7 +228,8 @@ Manager Core polls EVE Online's ESI `/characters/{id}/notifications/` endpoint d
 | `manager_core_api_token_usage` | Append-only API usage audit log |
 | `manager_core_worker_registry_snapshot` | Queue-worker registry state for debugging |
 | `manager_core_esi_key_holders` | Shared key holder pool for ESI fast-poll |
-| `manager_core_esi_notifications` | Polled notifications cache (cross-plugin) |
+| `manager_core_esi_notifications` | Polled notifications cache (cross-plugin), up to two weeks old |
+| `manager_core_esi_notification_deliveries` | What became of each notification at each plugin's handler |
 | `manager_core_pricing_preferences` | Per-plugin market + price-type preferences |
 
 ---
@@ -221,7 +239,8 @@ Manager Core polls EVE Online's ESI `/characters/{id}/notifications/` endpoint d
 ```bash
 # Refresh market prices for all configured markets (runs every 4h via cron)
 # Routes through whichever provider is configured per market — hub markets
-# hit ESI's region endpoint, citadel markets hit Goonpraisal / Janice / etc.
+# hit ESI's region endpoint, citadel markets read the structure through ESI
+# or ask Goonpraisal / Janice.
 manager-core:update-prices --market=all
 manager-core:update-prices --market=jita --types=34,35,36
 
@@ -251,7 +270,7 @@ manager-core:diagnose-esi
 ## ⚠️ Honest limitations
 
 - **No multi-language support yet.** Help docs + UI strings are English-only.
-- **CCP's `/markets/structures/{id}/` ESI endpoint is broken on large nullsec hubs.** v1.0.0 routes citadel pricing through third-party services (Goonpraisal et al.) instead. If your structure isn't in the Goonpraisal catalog (currently 7 Imperium-adjacent nullsec hubs), there's no automatic pricing path yet — Janice slug expansion + Adam4EVE integration are on the roadmap.
+- **A structure market is read whole.** ESI can't filter a structure's market by item, so a read costs one request per 1,000 orders (a 52,000-order Keepstar is 53 requests). One read prices every item plugins subscribe to there and is reused for 15 minutes. A structure no director in the ESI Key Pool can dock at can't be read this way; Goonpraisal covers 7 Imperium hubs without a token.
 - **Janice provider needs an API key** from `janice.e-351.com`. Without it, the provider is dormant and the dropdown shows "Janice (not configured)".
 - **Goonpraisal asks for an identifying User-Agent.** MC builds one from the plugin maintainer's email by default (`mattfalahe@gmail.com`); operators are encouraged to override with their own contact email via Settings so the service can reach the actual person if their queries cause issues.
 - **No web-based markdown editor for help / news.** All help content is in `src/Resources/lang/en/help.php`; admins who want to edit it locally need to rebuild the container.

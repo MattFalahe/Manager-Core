@@ -5,7 +5,7 @@ return [
     'help_documentation' => 'Help & Documentation',
     'search_placeholder' => 'Search documentation...',
     'overview' => 'Overview',
-    'plugin_family' => 'The Plugin Family',
+    'plugin_family' => 'Plugins & Ecosystem',
     'pricing_service' => 'Pricing Service',
     'appraisal_system' => 'Appraisal System',
     'plugin_bridge' => 'Plugin Bridge',
@@ -19,6 +19,10 @@ return [
     'rest_api' => 'REST API',
     'faq' => 'FAQ',
     'troubleshooting' => 'Troubleshooting',
+
+    // Marks what the latest release adds. Each release moves it to its own
+    // features, so the version changes here only.
+    'new_badge' => 'NEW in v1.1.0',
 
     // Plugin Information
     'plugin_info_title' => 'Plugin Information',
@@ -99,8 +103,8 @@ return [
 
     // Markets + Providers (rewritten v1.0.0 — third-party provider routing)
     'custom_markets_title' => 'Markets + Pricing Providers',
-    'custom_markets_intro' => 'MC ships with <strong>12 pre-seeded markets</strong> — the 5 public trade hubs (Jita / Amarr / Dodixie / Hek / Rens, enabled by default) plus 7 Goonpraisal-tracked Imperium nullsec hubs (disabled by default, operator opt-in). The <strong>Manager Core → Markets</strong> admin page lets you enable / disable any of these, plus add your own custom regional or citadel markets if you have a hub Goonpraisal doesn\'t cover.',
-    'custom_markets_use_case' => '<p><strong>Why the third-party-provider architecture:</strong> CCP\'s <code>/markets/structures/{id}/</code> ESI endpoint has an unfixable pagination bug on large nullsec hubs — pages 2..N return identical content to page 1, capping reachable orders at ~1000 of ~52,000 regardless of which auth character you use. We verified this empirically before pivoting. Third-party services like <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a> and <a href="https://janice.e-351.com" target="_blank" rel="noopener">Janice</a> have accumulated their own datasets and serve correct prices for the major nullsec markets. MC routes citadel queries through them instead of trying to scrape CCP directly.</p>',
+    'custom_markets_intro' => 'MC ships with <strong>12 pre-seeded markets</strong>: the 5 public trade hubs (Jita / Amarr / Dodixie / Hek / Rens, enabled by default) plus 7 Goonpraisal-tracked Imperium nullsec hubs (disabled by default, operator opt-in). The <strong>Manager Core → Markets</strong> admin page lets you enable / disable any of these, and add your own: any structure a director in your ESI Key Pool can dock at, read straight from ESI, or a regional hub.',
+    'custom_markets_use_case' => '<p><strong>Two ways to price a citadel market.</strong> MC can read the structure\'s own order book through ESI\'s <code>/markets/structures/{structure_id}/</code>, as a director from the ESI Key Pool who can dock there. That works for any structure your directors can reach, with nothing outside CCP involved. Or it can ask a third-party service that tracks the hub: <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a> covers the major Imperium markets and <a href="https://janice.e-351.com" target="_blank" rel="noopener">Janice</a> covers Jita and Amarr, with no ESI token needed.</p>',
     'custom_markets_two_types' => '<table style="width:100%; border-collapse:collapse; margin-top:10px; font-size:0.9em;">
         <thead><tr style="background:#23262d; color:#dfe3eb;">
             <th style="padding:6px 10px; text-align:left;">Provider</th>
@@ -110,8 +114,8 @@ return [
         <tbody>
             <tr>
                 <td style="padding:6px 10px;"><strong>MCPraisal (ESI)</strong></td>
-                <td style="padding:6px 10px;">Public hub markets via ESI <code>/markets/{region_id}/orders/</code> — type-filterable, no pagination bugs</td>
-                <td style="padding:6px 10px;">None</td>
+                <td style="padding:6px 10px;">Public hub markets via ESI <code>/markets/{region_id}/orders/</code>, and citadel markets read straight from the structure via <code>/markets/structures/{structure_id}/</code></td>
+                <td style="padding:6px 10px;">None for hubs. For a structure, a director in the ESI Key Pool who can dock there, with the <code>esi-markets.structure_markets.v1</code> scope</td>
             </tr>
             <tr>
                 <td style="padding:6px 10px;"><strong>Goonpraisal</strong></td>
@@ -125,7 +129,7 @@ return [
             </tr>
             <tr>
                 <td style="padding:6px 10px;"><strong>Fuzzwork</strong></td>
-                <td style="padding:6px 10px;">The 5 hub regions</td>
+                <td style="padding:6px 10px;">The 5 hubs, each at its station (Jita 4-4, Amarr VIII and the rest)</td>
                 <td style="padding:6px 10px;">None</td>
             </tr>
             <tr>
@@ -143,16 +147,25 @@ return [
         <li>Open <strong>Manager Core → Pricing Preferences</strong>. The newly-enabled citadel market now appears in the market dropdown for every consumer plugin without the "(disabled)" suffix. Pick it for whichever plugin (Mining Manager / Structure Manager / Buyback Manager) you want using your local hub pricing.</li>
     </ol>',
     'custom_markets_health_title' => 'Adding a custom market',
-    'custom_markets_health_table' => '<p>If your alliance trades somewhere outside the 7 pre-seeded Goonpraisal markets:</p>
+    'custom_markets_health_table' => '<p>To price a structure your alliance trades at, whether Goonpraisal covers it or not:</p>
     <ol>
-        <li>Open <strong>Manager Core → Markets → Add Custom Market</strong>.</li>
-        <li>Pick <em>Citadel / Player Structure</em> as the market type (or <em>Hub</em> for a regional hub Janice / Fuzzwork knows about).</li>
-        <li>Choose a <strong>Pricing Provider</strong> from the dropdown — Goonpraisal if it\'s in their catalog, Janice if it\'s a hub Janice tracks (Jita / Amarr / R1O-GN once we expand their slugs), or MCPraisal for hub markets via ESI.</li>
-        <li>Fill in the <strong>Provider Market Slug</strong> — this is the upstream service\'s identifier for the market. The hint under the field lists Goonpraisal\'s known slugs (uppercase structure codes like <code>C-J6MT</code>, <code>UALX-3</code>) and Janice\'s (<code>jita</code>, <code>amarr</code>).</li>
-        <li>Fill <strong>Region ID</strong> (always required for record-keeping; only actually used for ESI / Fuzzwork providers) and optional <strong>System ID</strong>, <strong>System Name</strong>, <strong>Structure Name</strong> display fields. Save.</li>
-        <li>Click <em>Test</em> on the row → verify the provider returns a price.</li>
-    </ol>',
-    'custom_markets_pagination_note' => '<p style="margin-top:10px;"><strong>Performance note:</strong> hub-market refreshes via the ESI region endpoint are batch-parallel (25 types concurrent), with a 30-minute TTL short-circuit so the scheduled cron skips types that already have fresh prices. Citadel-market refreshes via Goonpraisal/Janice are per-type sequential with a 0.75-second inter-batch pause (their terms of service). On most installs the full refresh cycle for all enabled markets completes in well under a minute.</p>',
+        <li>Make sure a director who can dock there is in the <strong>ESI Key Pool</strong>, and that their token has the <code>esi-markets.structure_markets.v1</code> scope.</li>
+        <li>Open <strong>Manager Core → Markets → Add Market</strong>. Keep <em>Citadel / Player Structure</em> and <em>MCPraisal (ESI)</em>.</li>
+        <li>Put the <strong>structure ID</strong> (a 13-digit number, e.g. <code>1049588174021</code>) in the <strong>Provider Market Slug</strong> field and give the market a display name. Region, system and structure name are filled in from SeAT when you leave them blank. Save.</li>
+        <li>Click <em>Test</em> on the row. A good read reports how many pages and orders it read, and which director it read them as.</li>
+    </ol>
+    <p>A market priced by Goonpraisal or Janice works the same way: pick that provider instead and put the service\'s own slug in the slug field. The hint under the field lists Goonpraisal\'s slugs (uppercase structure codes like <code>C-J6MT</code>, <code>UALX-3</code>) and Janice\'s (<code>jita</code>, <code>amarr</code>).</p>',
+    'custom_markets_pagination_note' => '<p style="margin-top:10px;"><strong>Performance note:</strong> hub-market refreshes via the ESI region endpoint are batch-parallel (25 types concurrent), with a 30-minute TTL short-circuit so the scheduled cron skips types that already have fresh prices. Goonpraisal and Janice are asked for up to 100 items per request, with a pause between requests (0.75 seconds for Goonpraisal, 2 seconds for Janice) so neither service sees a burst. A structure market read through ESI is read whole, since ESI can\'t filter it by item: one request per 1,000 orders (a 50,000-order Keepstar takes about 50), and that one read prices every item plugins subscribe to there. It is reused for 15 minutes. A page that fails with an ESI error or a timeout is tried twice more, a few seconds apart, before the read gives up. On most installs the full refresh cycle for all enabled markets completes in well under a minute.</p>',
+
+    'pricing_fallback_title' => 'When a provider fails',
+    'pricing_fallback_body' => '<p>When a market\'s provider fails a refresh outright (every request fails, or it answers with no prices at all for items it priced before), Manager Core asks a fallback provider for the same market. Pick it under <strong>Settings &rarr; Pricing &rarr; Fallback Provider</strong>: Fuzzwork by default, or MCPraisal, Janice, Goonpraisal or None. When the one you pick is the market\'s own provider, or can\'t price that market, Fuzzwork or MCPraisal is asked instead.</p>
+    <ul>
+        <li>Citadel markets stand in for each other, never a hub. A structure read through ESI that fails asks Goonpraisal when Goonpraisal tracks its system; a Goonpraisal market that fails reads a structure in the same system that another of your markets reads through ESI.</li>
+        <li>Whatever nothing can price keeps its cached price. Nothing writes a zero, and SeAT\'s prices never stand in. An item a provider answers with no price stays unpriced: only a failure gets a stand-in.</li>
+        <li>Items a failed request left out are asked for again ten minutes later, once. A refused key or a missing setting isn\'t retried, since asking again can\'t fix it.</li>
+        <li>A plugin reading through a provider override gets the same fallback, and Manager Core\'s cached price for that market for anything still missing.</li>
+        <li>Each market\'s row on the <strong>Markets</strong> page says how its own provider did on the last refresh; hover the status for what failed and what stood in. The Watchdog\'s <code>provider_unavailable</code> check reports a market whose provider failed outright.</li>
+    </ul>',
 
     'custom_markets_consume_title' => 'Pointing a plugin at a market',
     'custom_markets_consume_intro' => '<p>Enabling a market in MC just <em>makes it pickable</em> — it doesn\'t change pricing for any consumer plugin. To make Structure Manager\'s Fuel Economics (or Mining Manager\'s appraisal, or Buyback Manager) read from your citadel instead of Jita, point that plugin at the new market via <strong>Pricing Preferences</strong>. Zero plugin code changes — purely admin configuration.</p>',
@@ -173,8 +186,12 @@ return [
                 <td style="padding:6px 10px;">On-demand appraisals still work (the provider routes regardless of enabled state). The scheduled <code>update-prices</code> cron skips disabled markets — useful to stop spending API budget on markets you\'re not actively using.</td>
             </tr>
             <tr>
-                <td style="padding:6px 10px;">The third-party provider is down (HTTP error)</td>
-                <td style="padding:6px 10px;">Existing cached prices in <code>manager_core_market_prices</code> remain. The plugin keeps reading them (stale but functional). The Markets admin page shows the failure status — the provider auto-retries on the next refresh.</td>
+                <td style="padding:6px 10px;">The market\'s provider is down (HTTP errors, or no prices at all)</td>
+                <td style="padding:6px 10px;">Manager Core asks the <strong>fallback provider</strong> (Settings → Pricing, Fuzzwork unless you pick another) for the same market. A citadel market asks Goonpraisal when Goonpraisal tracks its system, or reads a structure in the same system that another of your markets reads through ESI. Whatever neither can price keeps its cached price in <code>manager_core_market_prices</code>; nothing is ever written as zero. The Markets page shows the failure and what stood in, and the Watchdog\'s <code>provider_unavailable</code> check reports it.</td>
+            </tr>
+            <tr>
+                <td style="padding:6px 10px;">Some requests of a refresh fail</td>
+                <td style="padding:6px 10px;">The items those requests carried keep their cached price and are asked for again ten minutes later, once. An item a provider answers with no price is not a failure and is not asked for again.</td>
             </tr>
             <tr>
                 <td style="padding:6px 10px;">An item has no price at the configured market</td>
@@ -205,7 +222,8 @@ return [
         <li>Per-market <code>provider</code> column on <code>manager_core_markets</code> wins for everyone else.</li>
         <li>Hard-coded <code>fuzzwork</code> fail-safe (only fires if a market row has no provider set, which shouldn\'t happen).</li>
     </ol>
-    <p><strong>Cache impact:</strong> when a plugin has an override set, MC bypasses its local cache and does a live upstream fetch on every read. Consumer plugins typically have their own local cache that absorbs the per-read cost. MM\'s 4-hour scheduled refresh becomes 4 hours of live Janice calls per cycle — totally fine.</p>
+    <p><strong>When the override provider fails</strong> outright, the fallback provider is asked for the same market, as it would be for the market\'s own provider, and anything still missing comes back at the last price MC has cached for that market. An item the override provider answers with no price stays unpriced. Either one comes back as the price alone, the lowest sell and the highest buy in every figure, the way Janice answers, so a plugin reading the lowest figure on each side still gets the highest buy.</p>
+    <p><strong>Cache impact:</strong> when a plugin has an override set, MC bypasses its local cache and does a live upstream fetch on every read. Consumer plugins typically have their own local cache that absorbs the per-read cost. Janice is asked for up to 100 types per request, a couple of seconds apart, so MM\'s scheduled refresh of a few hundred types is a handful of requests.</p>
     <p><strong>Credentials are still global.</strong> One Janice API key per install, configurable in Settings. Override just decides WHICH plugin uses it.</p>',
 
     // Appraisal System
@@ -251,6 +269,7 @@ return [
         <li><strong>Self-introspection:</strong> The bridge exposes <code>bridge.discoverCapabilities</code> so any plugin can enumerate what is currently callable</li>
         <li><strong>Capability versioning:</strong> Callers can require a minimum version via <code>bridge.requireMinimumVersion</code> for forward-compatible upgrades</li>
         <li><strong>Stale entry pruning:</strong> Capabilities whose owning plugin is no longer loadable are removed automatically on the next discover() pass</li>
+        <li><strong>Compatible plugins:</strong> Plugins outside the suite that announce themselves with <code>registerSelf()</code> get their own Compatible Plugins table under the Plugin Registry, with the same state, version and integration columns. Diagnostics lists them on the Plugin Connections tab too</li>
     </ul>',
 
     'plugin_status_title' => 'Plugin Status Indicators',
@@ -258,38 +277,56 @@ return [
     'status_yellow' => 'Installed (yellow) — installed but has not yet integrated with any Manager Core service',
     'status_grey' => 'Inactive (gray) — plugin service-provider class not loadable (not installed via composer, or installation incomplete)',
 
+    'compatible_plugins_title' => 'Compatible Plugins',
+    'compatible_plugins_desc' => 'A plugin from outside the suite that registers itself with the Plugin Bridge (<code>registerSelf()</code>) gets a Compatible Plugins table of its own on the Plugin Bridge page, under the Plugin Registry: its state, version, integrations, last activity and when it was last seen, with the same expandable details. Diagnostics lists it under Compatible plugins on the Plugin Connections tab, and Test All Plugins covers it. The ecosystem map and the Plugin Registry list the suite only.',
+
     'connected_plugins_title' => 'Connected Plugins',
     'connected_plugins_desc' => 'The following plugins can integrate with Manager Core:',
-    'plugin_mining' => 'Mining Manager: mining ledger, monthly tax invoices, theft detection, moon extractions, jackpot detection. Publishes mining.tax_created / theft_detected / jackpot_detected plus the moon-extraction lifecycle (mining.extraction_ready / unstable / expired); consumes structure.alert.* events; uses MC pricing.',
-    'plugin_structure' => 'Structure Manager: Upwell + POS fuel tracking, alert ladder (shield/armor/hull/destroyed), timer board, killmail enrichment, and structure doctrine compliance. Publishes a cross-plugin event family (structure.alert.* plus structure.doctrine.changed) via the EventBus, registers an ESI notification handler, and exposes a compliance.getForCorporation Plugin Bridge capability that HR Manager (in preparation) will render on its Corp Health page once released.',
-    'plugin_corp_wallet' => 'Corp Wallet Manager: corp wallet tracking, per-member contribution ledger, ratting tax, milestone ladder. Publishes wallet.* (transaction_detected / balance_low / unusual_recipient_detected) and a member.* family (contribution.stalled / milestone / drop_detected, tax.compliance_dropped), and exposes 16 read-only Plugin Bridge capabilities (ratting.* / contribution.* / wallet.*), including (v3.1) a corp financial summary via wallet.getCorpSummary (balance / income / expense / net + trend). HR Manager (in preparation) is the intended primary consumer.',
+    'plugin_mining' => 'Mining Manager: mining ledger, tax bills, theft detection, moon extractions, jackpot detection. Publishes the bill lifecycle (mining.tax_created / tax_paid / tax_overdue / tax_written_off / invoice_sent), theft incidents opened and closed (mining.theft_detected / theft_resolved), jackpot_detected, mining events and reports, plus the moon-extraction lifecycle (mining.extraction_ready / unstable / expired); consumes structure.alert.* events; uses MC pricing.',
+    'plugin_structure' => 'Structure Manager: Upwell + POS fuel tracking, alert ladder (shield/armor/hull/destroyed), timer board, killmail enrichment, and structure doctrine compliance. Publishes a cross-plugin event family (structure.alert.* plus structure.doctrine.changed) via the EventBus, registers an ESI notification handler, and exposes a compliance.getForCorporation Plugin Bridge capability that HR Manager renders on its Corp Health page.',
+    'plugin_corp_wallet' => 'Corp Wallet Manager: corp wallet tracking, per-member contribution ledger, ratting tax, milestone ladder. Publishes wallet.* (transaction_detected / balance_low / unusual_recipient_detected) and a member.* family (contribution.stalled / milestone / drop_detected, tax.compliance_dropped), and exposes read-only Plugin Bridge capabilities (ratting.* / contribution.* / wallet.*), including a corp financial summary via wallet.getCorpSummary (balance / income / expense / net + trend). HR Manager is the main consumer.',
     'plugin_buyback' => 'Buyback Manager (in preparation, not yet released): buyback programs, the offer workflow, and contract payout flow. Manager Core is already wired to route pricing to it for appraisals (with a Fuzzwork / Janice fallback chain); once released it will publish an offer + contract lifecycle event family (buyback.offer.* / buyback.contract.*) on the EventBus and own its Discord webhook delivery.',
-    'plugin_blueprint' => 'Blueprint Manager: corp blueprint library, member copy-request workflow, material cost analysis. Publishes blueprint.request.* (created / approved / rejected / fulfilled) and exposes blueprint.getCharacterStats / blueprint.getCorpSummary capabilities. HR Manager (in preparation) will consume both for its blueprint-engagement signal once released.',
-    'plugin_hr' => 'HR Manager (in preparation, not yet released): recruitment funnel and personnel assessment, designed as the main consumer across the suite. Once released it will subscribe to mining.*, Corp Wallet Manager member / wallet events, blueprint.request.* and SeAT Broadcast FC events, read Corp Wallet / Mining / Blueprint / Structure Manager capabilities through the Plugin Bridge (including Structure Manager structure-compliance), and publish its own hr.application.* / hr.player.* / hr.purge.* events. The Manager Core Topics and bridge are already wired for it.',
-    'plugin_broadcast' => 'SeAT Broadcast (mattfalahe/seat-discord-pings): fleet broadcast + Discord webhook routing with a planning calendar. Subscribes through the EventBus to Structure Manager timer events and Mining Manager extraction events to populate its fleet calendar, FC opportunities board and pre-timer reminders, and publishes pings.broadcast.sent / pings.formup.scheduled (for HR Manager, in preparation, to use for FC activity).',
+    'plugin_blueprint' => 'Blueprint Manager: corp blueprint library, member copy-request workflow, material cost analysis. Publishes blueprint.request.* (created / approved / rejected / fulfilled) and exposes blueprint.getCharacterStats / blueprint.getCorpSummary capabilities, which HR Manager reads for its blueprint-engagement signal.',
+    'plugin_hr' => 'HR Manager: recruitment funnel and personnel assessment, the main consumer across the suite. Subscribes to mining.*, Corp Wallet Manager member / wallet events, blueprint.request.*, structure.alert.* and SeAT Broadcast FC events, reads Corp Wallet, Blueprint and Structure Manager capabilities through the Plugin Bridge (including structure doctrine compliance), and publishes its own hr.application.* / hr.player.* events.',
+    'plugin_broadcast' => 'SeAT Broadcast (mattfalahe/seat-discord-pings): fleet broadcast + Discord webhook routing with a planning calendar. Subscribes through the EventBus to Structure Manager timer events and Mining Manager extraction events to populate its fleet calendar, FC opportunities board and pre-timer reminders, and publishes pings.broadcast.sent / pings.formup.scheduled, which HR Manager reads for FC activity.',
 
     // Artisan Commands
     'commands_title' => 'Artisan Commands Reference',
-    'commands_intro' => 'Manager Core provides several artisan commands for maintenance and operations.',
+    'commands_intro' => 'Manager Core provides several artisan commands for maintenance and operations. The scheduler runs the ones that need it, so these are for running something now. On a SeAT Docker install, run them in the front container as shown.',
 
     'update_prices_cmd_title' => 'Update Market Prices',
     'update_prices_cmd_desc' => 'Fetches the latest market prices from configured markets and writes them into the manager_core_market_prices cache.',
-    'update_prices_cmd' => 'php artisan manager-core:update-prices [--market=KEY] [--types=ID,ID,ID]',
+    'update_prices_cmd' => 'docker exec -it seat-docker-front-1 php artisan manager-core:update-prices [--market=KEY] [--types=ID,ID,ID]',
     'update_prices_note' => 'Runs automatically every 4 hours via the scheduler. Manual flags: <code>--market=jita</code> limits to a single market; <code>--types=34,35,36</code> updates only those type IDs (otherwise updates the union of all subscribed types).',
 
     'cleanup_cmd_title' => 'Clean Up Old Data',
     'cleanup_cmd_desc' => 'Removes old appraisals and price history to maintain database performance.',
-    'cleanup_cmd' => 'php artisan manager-core:cleanup',
+    'cleanup_cmd' => 'docker exec -it seat-docker-front-1 php artisan manager-core:cleanup',
     'cleanup_note' => 'Configurable retention periods can be set in the plugin configuration.',
 
     'cleanup_events_cmd_title' => 'Clean Up Forensic Logs',
     'cleanup_events_cmd_desc' => 'Daily cleanup of three append-only forensic tables: event log, API token usage history, and settings audit log.',
-    'cleanup_events_cmd' => 'php artisan manager-core:cleanup-events',
+    'cleanup_events_cmd' => 'docker exec -it seat-docker-front-1 php artisan manager-core:cleanup-events',
     'cleanup_events_note' => 'Retention defaults: events 30d, api token usage 30d, settings audit 365d. Override events with --days=N (other tables are tuned via config). Scheduled to run daily at 04:00.',
+
+    'cleanup_stale_cmd_title' => 'Clean Up Stale Subscriptions',
+    'cleanup_stale_cmd_desc' => 'Deactivates the event subscriptions of plugins that are no longer installed, so the EventBus stops trying to deliver to them, and marks those plugins inactive in the registry.',
+    'cleanup_stale_cmd' => 'docker exec -it seat-docker-front-1 php artisan manager-core:cleanup-stale-subscriptions [--delete] [--dry-run]',
+    'cleanup_stale_note' => '<code>--dry-run</code> lists what it would change and changes nothing. <code>--delete</code> deletes the subscriptions instead of deactivating them. Scheduled to run daily at 05:00.',
+
+    'poll_esi_cmd_title' => 'Poll ESI Notifications',
+    'poll_esi_cmd_desc' => 'One fast-poll cycle: reads new notifications from directors in the ESI Key Pool and hands them to every plugin that handles them, along with anything the SeAT sweep found.',
+    'poll_esi_cmd' => 'docker exec -it seat-docker-front-1 php artisan manager-core:poll-esi-notifications',
+    'poll_esi_note' => 'Scheduled every 2 minutes. It dispatches what the sweep found even with nobody in the key pool.',
+
+    'sweep_cmd_title' => 'Sweep SeAT Notifications',
+    'sweep_cmd_desc' => 'Copies notifications SeAT stored in the last 2 hours that fast-poll does not have yet into Manager Core\'s table. The next poll dispatches them.',
+    'sweep_cmd' => 'docker exec -it seat-docker-front-1 php artisan manager-core:sweep-seat-notifications',
+    'sweep_note' => 'Scheduled every minute. It is the safety net for anything fast-poll missed, and the only source when the key pool is empty.',
 
     'diagnose_cmd_title' => 'Run Diagnostics',
     'diagnose_cmd_desc' => 'Comprehensive system health check covering pricing, subscriptions, plugins, and more.',
-    'diagnose_cmd' => 'php artisan manager-core:diagnose --detailed',
+    'diagnose_cmd' => 'docker exec -it seat-docker-front-1 php artisan manager-core:diagnose --detailed',
     'diagnose_note' => 'Add --test-esi to test ESI connectivity, --show-prices for cached price samples.',
 
     // SDE Helpers Section
@@ -384,6 +421,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'topics_usage_title' => 'Consumer pattern',
     'topics_usage_code' => 'if (class_exists(\\ManagerCore\\Topics::class)) {
     \\ManagerCore\\Topics::publish(\'mining.tax_created\', [
+        \'tax_id\'       => $taxId,
         \'character_id\' => $charId,
         \'period\'       => $period,
         \'amount_owed\'  => $amount,
@@ -398,7 +436,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'topics_registry_title' => 'Topic registry (currently registered)',
     'topics_registry_intro' => 'Use <code>\\ManagerCore\\Topics::all()</code> at runtime to enumerate all topics. The registered set right now:',
     'topics_registry_list' => '<ul>
-        <li><strong>mining.*</strong> (13 topics) — tax_created, tax_paid, tax_overdue, invoice_sent, theft_detected, jackpot_detected, session_started/_ended, event_created/_started/_completed, report_generated, moon_extraction_ready</li>
+        <li><strong>mining.*</strong> (15 topics): tax_created, tax_paid, tax_overdue, tax_written_off, invoice_sent, theft_detected, theft_resolved, jackpot_detected, session_started/_ended, event_created/_started/_completed, report_generated, moon_extraction_ready</li>
         <li><strong>mining.extraction_*</strong> (3 topics, MM v2.0.1+) — <code>extraction_ready</code>, <code>extraction_unstable</code>, <code>extraction_expired</code>. SeAT Broadcast subscribes to surface mining ops on the FC Opportunities board.</li>
         <li><strong>structure.alert.*</strong> (9 topics)
             <ul>
@@ -407,10 +445,10 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
                 <li>Tactical planning (added 2026-05): <code>anchoring_started</code>, <code>sov_reinforced</code>, <code>entosis_in_progress</code> — each carries a <code>timer_ends_at</code> field so consumers can render planning calendars or schedule pre-timer pings</li>
             </ul>
         </li>
-        <li><strong>wallet.*</strong> (3 topics) — <code>wallet.transaction_detected</code>, <code>wallet.balance_low</code>, and <code>wallet.unusual_recipient_detected</code> (added v1.0.1; HR Manager, in preparation, will subscribe for assessment-cache nudges + audit trail once released). All published by Corp Wallet Manager.</li>
-        <li><strong>member.*</strong> (4 topics) — CWM publishes per-member milestone transitions: <code>member.contribution.stalled</code>, <code>member.contribution.milestone</code>, <code>member.contribution.drop_detected</code> (added v1.0.1), <code>member.tax.compliance_dropped</code>. HR Manager (in preparation) will subscribe to all four for the player classifier once released.</li>
-        <li><strong>hr.player.milestone_reached</strong> (added v1.0.1) — a pre-registered topic that HR Manager (in preparation) will publish once released, when a tracked player crosses a contribution ladder rung computed across alts. Ready for SeAT Broadcast to subscribe and route to a promotion channel.</li>
-        <li><strong>pings.broadcast.sent</strong> + <strong>pings.formup.scheduled</strong> — SeAT Broadcast publishes these so other plugins can detect "who\'s acting as an active FC" without peeking at Broadcast\'s tables. No live subscribers yet.</li>
+        <li><strong>wallet.*</strong> (3 topics) — <code>wallet.transaction_detected</code>, <code>wallet.balance_low</code>, and <code>wallet.unusual_recipient_detected</code> (added v1.0.1; HR Manager subscribes for assessment-cache nudges and its audit trail). All published by Corp Wallet Manager.</li>
+        <li><strong>member.*</strong> (4 topics) — CWM publishes per-member milestone transitions: <code>member.contribution.stalled</code>, <code>member.contribution.milestone</code>, <code>member.contribution.drop_detected</code> (added v1.0.1), <code>member.tax.compliance_dropped</code>. HR Manager subscribes to all four for its player classifier.</li>
+        <li><strong>hr.player.milestone_reached</strong> (added v1.0.1) — a pre-registered topic for HR Manager, for when a tracked player crosses a contribution ladder rung computed across alts. HR Manager doesn\'t publish it yet. Ready for SeAT Broadcast to subscribe and route to a promotion channel.</li>
+        <li><strong>pings.broadcast.sent</strong> + <strong>pings.formup.scheduled</strong> — SeAT Broadcast publishes these so other plugins can detect "who\'s acting as an active FC" without peeking at Broadcast\'s tables. HR Manager subscribes to both for FC activity.</li>
         <li><strong>buyback.completed</strong> — a pre-registered topic that Buyback Manager (in preparation) will publish once released, when a buyback completes. No live subscribers yet.</li>
         <li><strong>pricing.preference_changed</strong> — Manager Core publishes when an operator updates a row in Pricing Preferences. Mining Manager subscribes to flush its local price cache.</li>
     </ul>',
@@ -448,11 +486,18 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'fast_poll_how_body' => '<ol>
         <li><strong>Every 2 minutes</strong>, MC picks N directors from the shared pool using <strong>per-corp fair LRU rotation</strong> — one least-recently-polled character per corp per cycle, so a corp with 1 director gets the same coverage as a corp with 50.</li>
         <li>N is computed adaptively from the pool: <code>batch = max(corps_count, ceil(pool × 120s / 600s))</code>, clamped to [1, 30]. The 600s aligns with CCP\'s notification endpoint cache TTL.</li>
-        <li>Each picked director\'s notifications are deduped against <code>manager_core_esi_notifications</code> by CCP\'s globally-unique <code>notification_id</code>.</li>
-        <li>New rows are dispatched to all plugins that registered a handler for that notification type via <code>EsiNotificationRegistry</code>.</li>
+        <li>Each picked director\'s notifications are deduped against <code>manager_core_esi_notifications</code> by CCP\'s globally-unique <code>notification_id</code>. Anything up to two weeks old is kept, because ESI sometimes serves a notification hours late.</li>
+        <li>New rows are dispatched to every plugin that registered a handler for that notification type via <code>EsiNotificationRegistry</code>, as long as the notification is no older than that plugin takes (see <em>Notifications ESI serves late</em> below).</li>
         <li>If the entire batch fails (CCP 5xx burst), MC self-dispatches a cascade retry with DIFFERENT characters within 5 seconds, up to 4 attempts total in 15s.</li>
-        <li>A separate <strong>10-minute sweep</strong> reads SeAT\'s <code>character_notifications</code> table and writes any notifications fast-poll missed (source = <code>seat_fallback</code>) — the belt-and-braces safety net.</li>
+        <li>A separate sweep <strong>every minute</strong> reads what SeAT stored in its <code>character_notifications</code> table in the last 2 hours, including notifications ESI served SeAT late, and writes any that fast-poll missed (source = <code>seat_fallback</code>), and the next 2-minute cycle dispatches them, with or without directors in the pool — the belt-and-braces safety net.</li>
     </ol>',
+
+    'fast_poll_ages_title' => 'Notifications ESI serves late',
+    'fast_poll_ages_body' => '<p>ESI sometimes holds a notification back for hours, so Manager Core keeps anything up to two weeks old. Each plugin\'s handler says how old it takes them: 2 hours unless the plugin asks for more, and 72 hours for moon extraction starts (<code>MoonminingExtractionStarted</code>), since an extraction runs for days. The <strong>Max Age</strong> column under Subscribed Plugins on the ESI Key Pool page shows each plugin\'s.</p>
+    <p>What became of each notification at each plugin (handled, queued, failed, or too old, with how late it was) is kept in <code>manager_core_esi_notification_deliveries</code>. These ages apply to notifications CCP sent after the update that brought them in; older ones went out, or didn\'t, under the old 2-hour rule.</p>',
+
+    'fast_poll_pool_title' => 'The Director Key Pool table',
+    'fast_poll_pool_body' => '<p>The ESI Key Pool page lists every director in the pool with their character ID, corporation name and ID, status, last poll and how many notifications they found. Filter it by corporation or by status, and show 25, 50, 75 or 100 rows a page or all of them. A line separates one corporation\'s directors from the next. The filters stay as you set them while you pause, resume or remove directors. A corporation SeAT has no record of shows as <code>Corp #&lt;id&gt;</code>.</p>',
 
     'fast_poll_scale_title' => 'Detection time vs pool composition',
     'fast_poll_scale_intro' => '<p>The interesting question is not "how many directors do I need?" but "how many <strong>corps</strong> are they spread across?" Sov / structure / corp-wide notifications are visible to every director in the relevant corp, so adding more directors of the same corp only adds <em>fault tolerance</em> — not speed.</p>',
@@ -514,7 +559,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'fast_poll_fallback_body' => '<ol>
         <li><strong>Fast-poll</strong> (every 2 min): MC\'s adaptive-batch mechanism. Catches ~95% of notifications within 2-5 min.</li>
         <li><strong>Cascade retry</strong> (within 15s of fast-poll failure): on CCP 5xx burst, immediately tries up to 4 batches of different chars without waiting for the next cron tick.</li>
-        <li><strong>SeAT-native sweep</strong> (every 10 min): MC reads SeAT\'s <code>character_notifications</code> directly, dedups against the shared table, writes anything fast-poll missed.</li>
+        <li><strong>SeAT-native sweep</strong> (every minute): MC reads SeAT\'s <code>character_notifications</code> directly, dedups against the shared table, writes anything fast-poll missed.</li>
         <li><strong>SeAT-native bucket</strong> (every 20 min): if MC is uninstalled entirely, consumer plugins fall back to SeAT\'s native cadence. Same quality as vanilla SeAT.</li>
     </ol>
     <p>All layers dedup by <code>notification_id</code> so duplicate detection across layers is harmless.</p>',
@@ -576,7 +621,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'faq_a1' => 'Market prices are updated automatically by the scheduled task <code>manager-core:update-prices</code>, which runs every 4 hours by default (cron: <code>0 */4 * * *</code>). The interval is editable from the Settings page (Pricing tab → Update Frequency) and the schedule entry is updated live when you save.',
 
     'faq_q2' => 'Q2: Can I add custom markets?',
-    'faq_a2' => 'Yes — two ways. (1) From the <strong>Settings page</strong> (Markets tab), click <em>Add Market</em>, fill in the key, name, EVE region ID, and comma-separated system IDs. The region ID and system IDs are validated against the SDE before save. (2) For static defaults, edit <code>manager-core.config.php</code> under <code>pricing.markets</code>. DB markets take precedence over config defaults.',
+    'faq_a2' => 'Yes, two ways. (1) Open <strong>Manager Core → Markets</strong> and click <em>Add Market</em>. For a player structure, keep <em>Citadel</em> and <em>MCPraisal (ESI)</em> and put the structure ID in the slug field; see <em>Markets + Pricing Providers</em> above. (2) For static hub defaults, edit <code>manager-core.config.php</code> under <code>pricing.markets</code>. DB markets take precedence over config defaults.',
 
     'faq_q3' => 'Q3: Are appraisals stored permanently?',
     'faq_a3' => 'Appraisals are stored in <code>manager_core_appraisals</code> indefinitely by default. To prune old ones, run <code>php artisan manager-core:cleanup</code> (or schedule it). Appraisal retention is intentionally manual so you do not lose audit trails by accident.',
@@ -655,12 +700,12 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
         <tr><td style="padding: 8px;"><code>eventbus_failures</code></td><td style="padding: 8px;">≥10 EventBus deliveries failed in the last 60 minutes (subscriber capabilities throwing, plugins missing handlers, malformed payloads).</td></tr>
         <tr><td style="padding: 8px;"><code>price_cron_overdue</code></td><td style="padding: 8px;">Newest cached price is older than 2× the scheduled refresh interval. Indicates SeAT scheduler is dead, the update-prices command is throwing, or all providers are unreachable.</td></tr>
         <tr><td style="padding: 8px;"><code>esi_fast_poll_failing</code></td><td style="padding: 8px;">≥80% of enabled ESI key holders have a non-success <code>last_poll_status</code>. CCP outage, every director\'s token expired simultaneously, or pool fully exhausted. Skipped when pool has &lt;3 enabled keys (single-key issues are operator-level).</td></tr>
-        <tr><td style="padding: 8px;"><code>provider_unavailable</code></td><td style="padding: 8px;">Any price provider configured on an enabled market reports <code>isAvailable=false</code>. Typically missing credentials (Janice API key, SeAT prices-core sub-provider) for a provider you\'ve assigned to a market.</td></tr>
+        <tr><td style="padding: 8px;"><code>provider_unavailable</code></td><td style="padding: 8px;">Any price provider used by an enabled market, or set as a plugin\'s provider override, reports <code>isAvailable=false</code>, or Janice turned its last request away (wrong or blocked key, or too many requests) or failed every request of it, or an enabled market\'s own provider failed its last refresh outright (the alert names the market, what failed and what stood in). Typically missing or refused credentials (Janice API key, SeAT prices-core sub-provider), a provider that is down, or a structure no Key Pool director can read. Saving a new Janice key clears the refusal, and the next fetch shows whether Janice takes the new one. A failing Janice is reported once when it starts and once, in green, when it answers again; the rest of this check repeats every hour while it lasts.</td></tr>
         <tr><td style="padding: 8px;"><code>plugin_updates_available</code></td><td style="padding: 8px;">Any plugin in the suite has a new tagged release on Packagist that this install hasn\'t picked up yet. Batched alert lists every outdated plugin in one message; clickable title deep-links to MC → Plugin Bridge. <strong>7-day per-(plugin, version) cooldown</strong>, not the standard 1h — same release won\'t spam, but a NEW version cuts the cooldown immediately so you hear about it the next tick.</td></tr>
     </table>',
 
     'watchdog_dedup_title' => 'Deduplication',
-    'watchdog_dedup_body' => 'Each fired alert sets a Redis key with a 1-hour TTL. The same check cannot re-fire within that window even if the condition persists. This prevents the operator getting 12 identical "EventBus failing" pings/hour while they\'re diagnosing. Restart the front container or wait 1h for the next alert.',
+    'watchdog_dedup_body' => 'Each fired alert sets a Redis key with a 1-hour TTL. The same check cannot re-fire within that window even if the condition persists. This prevents the operator getting 12 identical "EventBus failing" pings/hour while they\'re diagnosing. Two exceptions: <code>plugin_updates_available</code> waits 7 days per plugin version, and a refused or failing Janice key, which stays that way until someone changes it, is reported once when it starts failing and once when it answers again.',
 
     'watchdog_exclusion_title' => 'Exclusion windows',
     'watchdog_exclusion_body' => 'EVE Online has a daily downtime at <code>11:00-11:05</code> UTC where ESI returns errors across the board. Without exclusion, the watchdog would fire <code>esi_fast_poll_failing</code> every single day at 11:00. The default <code>11:00-11:10</code> window adds a 5-minute buffer for ESI to come back up. Add comma-separated additional windows for your own maintenance: <code>11:00-11:10, 23:55-00:05</code>.',
@@ -675,21 +720,45 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'watchdog_limitations_body' => '<ul>
         <li>Watchdog itself depends on Redis (for dedup) + the SeAT scheduler running its cron. If those are down, Watchdog won\'t fire — but neither will anything else in SeAT, so you\'ll notice via other paths.</li>
         <li>The webhook URL is stored in the <code>manager_core_settings</code> table; treat the table as sensitive in your DB backups.</li>
-        <li>Discord/Slack auto-detect by URL pattern. Custom webhooks (Mattermost, generic JSON receivers) are not supported in v1.0.x — open an issue if you need this.</li>
+        <li>Discord/Slack auto-detect by URL pattern. Custom webhooks (Mattermost, generic JSON receivers) are not supported yet — open an issue if you need this.</li>
     </ul>',
 
-    // What\'s New in v1.0.2 — upgrade highlights box that sits under the
-    // creator note on the Overview page. Patch on top of v1.0.1: wires
-    // Structure Manager\'s doctrine-compliance feature into the ecosystem.
-    'whats_new_v102_title' => 'What\'s New in v1.0.2',
-    'whats_new_v102_intro' => 'Doctrine-compliance wiring on top of v1.0.1. Structure Manager\'s structure-doctrine compliance feature is now first-class in the ecosystem: MC registers the structure.doctrine.changed Topic and the compliance.getForCorporation bridge wiring, so HR Manager (in preparation, not yet released) can show per-corp doctrine compliance on Corp Health once it ships. Plus a Connected Plugins accuracy pass on this page so each entry tracks its real release status.',
-    'whats_new_v102_list' => '<ul>
-        <li><strong>New Topic: <code>structure.doctrine.changed</code>.</strong>
-            Structure Manager publishes it whenever a fitting doctrine (or a compliance setting) changes; the payload carries the scope, an optional structure type + security band, and the action (created / updated / deleted / settings). HR Manager (in preparation) will subscribe to invalidate its cached view, then re-pull the full report via the <code>compliance.getForCorporation</code> Plugin Bridge capability. Registering it gives it the same required-field validation, idempotency template and Topic Matrix visibility every other event has. The registry is now <strong>60 entries</strong> (was 59).</li>
-        <li><strong>Connected Plugins now track real release status.</strong>
-            The descriptions follow each plugin\'s Packagist release state: the released plugins (Corp Wallet Manager, Blueprint Manager, SeAT Broadcast and the rest) describe what they publish and consume today, while the not-yet-released ones (Buyback Manager, HR Manager) are shown as in preparation with MC already wired for them. The SeAT Broadcast display name is corrected and the block matches the README plugin table.</li>
-        <li><strong>Ecosystem map.</strong>
-            The <em>Help &rarr; The Plugin Family</em> map gains the Structure Manager &rarr; HR Manager edge: per-structure doctrine compliance vs alliance fits, rendered on Corp Health.</li>
+    // What's New in v1: the major version as a whole. It never names a point
+    // release; those go in Recent changes below it.
+    'whats_new_v1_title' => 'What\'s New in v1',
+    'whats_new_v1_name' => 'The Foundation Era',
+    'whats_new_v1_intro' => 'Version 1 is the hub the rest of the plugin family plugs into. Every plugin works without it. With it, they price items from one set of markets, hear each other\'s events and ask each other for what they know.',
+    'whats_new_v1_list' => '<ul>
+        <li><strong>One price source for the suite.</strong> The five trade hubs and your citadels, each with its own provider (MCPraisal through ESI, Fuzzwork, Janice, Goonpraisal or SeAT\'s prices), refreshed on a schedule. Each plugin picks its market and price type on <strong>Pricing Preferences</strong>.</li>
+        <li><strong>Events between plugins.</strong> A plugin publishes what happened (a tax bill, a structure under attack, a blueprint request) and the plugins that care react. The Topic Matrix lists every event, who sends it and who listens.</li>
+        <li><strong>The Plugin Bridge.</strong> Plugins ask each other for data by capability name. The Plugin Bridge page shows which plugins are installed, what each has wired and the events flowing now.</li>
+        <li><strong>The ESI Key Pool.</strong> Directors you add poll ESI notifications every 2 minutes for every plugin that handles them, with SeAT\'s own notifications swept every minute as the safety net.</li>
+        <li><strong>Watchdog and Diagnostics.</strong> Watchdog checks Manager Core\'s own parts every 5 minutes and posts to a Discord or Slack webhook when one stops working. Diagnostics tests each part on demand.</li>
+        <li><strong>Appraisals, SDE lookups, ISK formatting and a REST API</strong> for the plugins and tools that need them.</li>
     </ul>',
-    'whats_new_v102_upgrade_note' => 'No new tables, no schema changes, and no behavior changes to anything already wired, fully backward-compatible. Standard SeAT-Docker stack-down/stack-up recipe to upgrade; full notes in CHANGELOG.MD on the GitHub repo.',
+
+    // Recent changes: what the latest release changed that an operator can
+    // see without reading the changelog. Cleared when the next What's New is
+    // written.
+    'recent_changes_title' => 'In this update (1.1.0)',
+    'recent_changes_name' => 'The Ecosystem Era: Market Expansion',
+    'recent_changes_body' => '<p>The changes in this release you will notice without going looking. <a href="https://github.com/MattFalahe/Manager-Core/blob/main/CHANGELOG.MD" target="_blank" rel="noopener">The changelog</a> has the complete record.</p>
+    <h5>Prices</h5>
+    <ul>
+        <li><strong>Citadel markets read through ESI.</strong> Any structure a director in your ESI Key Pool can dock at can be a market now: add it on the <strong>Markets</strong> page with its structure ID in the slug field. The director\'s token needs the <code>esi-markets.structure_markets.v1</code> scope. Adding your own markets is back, with Edit and Delete for the ones you add.</li>
+        <li><strong>Another provider stands in when one fails.</strong> When a market\'s provider fails a refresh outright, a fallback provider prices the same market: Fuzzwork unless you pick another under <strong>Settings &rarr; Pricing &rarr; Fallback Provider</strong>. Whatever nothing can price keeps its last price. Each market\'s row on the Markets page says how its provider did on the last refresh.</li>
+        <li><strong>Hub prices come from the hub.</strong> Fuzzwork priced each hub from its whole region, and Janice never answered for Amarr. Fuzzwork now prices Jita 4-4, Amarr VIII, Dodixie, Hek and Rens from their stations, and Janice prices Amarr, so expect hub prices to move a little from the first refresh after the update.</li>
+    </ul>
+    <h5>Notifications</h5>
+    <ul>
+        <li><strong>Late notifications still arrive.</strong> ESI sometimes serves a notification hours late. Manager Core keeps them up to two weeks now, and each plugin says how old it takes them: the ESI Key Pool page shows it in a new <strong>Max Age</strong> column.</li>
+        <li><strong>An empty key pool no longer holds notifications back.</strong> With nobody in the ESI Key Pool, or everyone suspended, notifications the sweep found in SeAT never reached the plugins. They do now, so on such an install alerts start arriving that never did.</li>
+        <li><strong>The Director Key Pool table</strong> has Character ID and Corporation Name columns, filters by corporation and status, 25 to 100 rows a page or all of them, and a line between corporations.</li>
+    </ul>
+    <h5>Plugin Bridge, Watchdog and Diagnostics</h5>
+    <ul>
+        <li><strong>Compatible Plugins.</strong> A plugin from outside the suite that registers itself with Manager Core now shows on the Plugin Bridge page in a Compatible Plugins table, and on Diagnostics under Plugin Connections.</li>
+        <li><strong>Janice is reported once.</strong> The Watchdog reported a refused or failing Janice key every hour until someone fixed it. It now reports it once when it starts, and once in green when Janice answers again.</li>
+        <li><strong>The ESI key pool check on Diagnostics counts directors that can be polled.</strong> A pool where every director is cooling down after failed polls showed as a pass; it is a warning now, with when the first one comes back.</li>
+    </ul>',
 ];
