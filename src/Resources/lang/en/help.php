@@ -22,7 +22,7 @@ return [
 
     // Marks what the latest release adds. Each release moves it to its own
     // features, so the version changes here only.
-    'new_badge' => 'NEW in v1.1.0',
+    'new_badge' => 'NEW in v1.2.0',
 
     // Plugin Information
     'plugin_info_title' => 'Plugin Information',
@@ -104,7 +104,7 @@ return [
     // Markets + Providers (rewritten v1.0.0 — third-party provider routing)
     'custom_markets_title' => 'Markets + Pricing Providers',
     'custom_markets_intro' => 'MC ships with <strong>12 pre-seeded markets</strong>: the 5 public trade hubs (Jita / Amarr / Dodixie / Hek / Rens, enabled by default) plus 7 Goonpraisal-tracked Imperium nullsec hubs (disabled by default, operator opt-in). The <strong>Manager Core → Markets</strong> admin page lets you enable / disable any of these, and add your own: any structure a director in your ESI Key Pool can dock at, read straight from ESI, or a regional hub.',
-    'custom_markets_use_case' => '<p><strong>Two ways to price a citadel market.</strong> MC can read the structure\'s own order book through ESI\'s <code>/markets/structures/{structure_id}/</code>, as a director from the ESI Key Pool who can dock there. That works for any structure your directors can reach, with nothing outside CCP involved. Or it can ask a third-party service that tracks the hub: <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a> covers the major Imperium markets and <a href="https://janice.e-351.com" target="_blank" rel="noopener">Janice</a> covers Jita and Amarr, with no ESI token needed.</p>',
+    'custom_markets_use_case' => '<p><strong>Two ways to price a citadel market.</strong> MC can read the structure\'s own order book through ESI\'s <code>/markets/structures/{structure_id}/</code>, as a director from the ESI Key Pool who can dock there. That works for any structure your directors can reach, with nothing outside CCP involved. Or it can ask a third-party service that tracks the hub: <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a> covers the major Imperium markets and <a href="https://janice.e-351.com" target="_blank" rel="noopener">Janice</a> covers the five trade hubs, with no ESI token needed.</p>',
     'custom_markets_two_types' => '<table style="width:100%; border-collapse:collapse; margin-top:10px; font-size:0.9em;">
         <thead><tr style="background:#23262d; color:#dfe3eb;">
             <th style="padding:6px 10px; text-align:left;">Provider</th>
@@ -124,7 +124,7 @@ return [
             </tr>
             <tr>
                 <td style="padding:6px 10px;"><strong>Janice</strong></td>
-                <td style="padding:6px 10px;">Jita + Amarr (more slugs coming)</td>
+                <td style="padding:6px 10px;">The 5 hubs, each at its station (Jita 4-4, Amarr, Dodixie, Hek, Rens)</td>
                 <td style="padding:6px 10px;">API key from janice.e-351.com</td>
             </tr>
             <tr>
@@ -150,11 +150,12 @@ return [
     'custom_markets_health_table' => '<p>To price a structure your alliance trades at, whether Goonpraisal covers it or not:</p>
     <ol>
         <li>Make sure a director who can dock there is in the <strong>ESI Key Pool</strong>, and that their token has the <code>esi-markets.structure_markets.v1</code> scope.</li>
-        <li>Open <strong>Manager Core → Markets → Add Market</strong>. Keep <em>Citadel / Player Structure</em> and <em>MCPraisal (ESI)</em>.</li>
-        <li>Put the <strong>structure ID</strong> (a 13-digit number, e.g. <code>1049588174021</code>) in the <strong>Provider Market Slug</strong> field and give the market a display name. Region, system and structure name are filled in from SeAT when you leave them blank. Save.</li>
+        <li>Open <strong>Manager Core → Markets → Add Market</strong> and keep <em>A player structure</em>.</li>
+        <li>Under <strong>Find it</strong>, type part of the structure\'s name or its system, and pick it from the list. Fortizars and Keepstars are suggested, since they are the structures that can hold a market. The display name, key, system and region fill themselves in from SeAT, and <em>MCPraisal (ESI)</em> is picked: it is the one provider that reads a single structure.</li>
+        <li>A structure SeAT hasn\'t seen yet can be typed by its <strong>structure ID</strong> (a 13-digit number, e.g. <code>1049588174021</code>). Pick its system in the box that appears and give the market a name. Save.</li>
         <li>Click <em>Test</em> on the row. A good read reports how many pages and orders it read, and which director it read them as.</li>
     </ol>
-    <p>A market priced by Goonpraisal or Janice works the same way: pick that provider instead and put the service\'s own slug in the slug field. The hint under the field lists Goonpraisal\'s slugs (uppercase structure codes like <code>C-J6MT</code>, <code>UALX-3</code>) and Janice\'s (<code>jita</code>, <code>amarr</code>).</p>',
+    <p>The same search finds Goonpraisal\'s citadel markets by their code (<code>C-J6MT</code>, <code>UALX-3</code>) or region, and with <em>A region\'s public market</em> picked it finds a system or a region by name. Only the providers that can price the place you picked can be chosen: each of the others says why not, and a place already on the list says so. The IDs are under <strong>Show the IDs</strong> if you ever need to type them yourself.</p>',
     'custom_markets_pagination_note' => '<p style="margin-top:10px;"><strong>Performance note:</strong> hub-market refreshes via the ESI region endpoint are batch-parallel (25 types concurrent), with a 30-minute TTL short-circuit so the scheduled cron skips types that already have fresh prices. Goonpraisal and Janice are asked for up to 100 items per request, with a pause between requests (0.75 seconds for Goonpraisal, 2 seconds for Janice) so neither service sees a burst. A structure market read through ESI is read whole, since ESI can\'t filter it by item: one request per 1,000 orders (a 50,000-order Keepstar takes about 50), and that one read prices every item plugins subscribe to there. It is reused for 15 minutes. A page that fails with an ESI error or a timeout is tried twice more, a few seconds apart, before the read gives up. On most installs the full refresh cycle for all enabled markets completes in well under a minute.</p>',
 
     'pricing_fallback_title' => 'When a provider fails',
@@ -163,7 +164,7 @@ return [
         <li>Citadel markets stand in for each other, never a hub. A structure read through ESI that fails asks Goonpraisal when Goonpraisal tracks its system; a Goonpraisal market that fails reads a structure in the same system that another of your markets reads through ESI.</li>
         <li>Whatever nothing can price keeps its cached price. Nothing writes a zero, and SeAT\'s prices never stand in. An item a provider answers with no price stays unpriced: only a failure gets a stand-in.</li>
         <li>Items a failed request left out are asked for again ten minutes later, once. A refused key or a missing setting isn\'t retried, since asking again can\'t fix it.</li>
-        <li>A plugin reading through a provider override gets the same fallback, and Manager Core\'s cached price for that market for anything still missing.</li>
+        <li>A plugin reading through a provider override gets the same fallback, and Manager Core\'s cached price for that market for anything still missing. Neither is kept as that provider\'s price, so the provider is asked again on the plugin\'s next read.</li>
         <li>Each market\'s row on the <strong>Markets</strong> page says how its own provider did on the last refresh; hover the status for what failed and what stood in. The Watchdog\'s <code>provider_unavailable</code> check reports a market whose provider failed outright.</li>
     </ul>',
 
@@ -203,17 +204,28 @@ return [
             </tr>
             <tr>
                 <td style="padding:6px 10px;">You want one plugin on a different provider than other plugins reading the same market</td>
-                <td style="padding:6px 10px;">Use the <strong>Provider Override</strong> dropdown on the plugin\'s row in Pricing Preferences. Default "Use market\'s provider" reads MC\'s cached prices populated via the per-market routing. Picking a specific provider routes THIS plugin\'s reads through that provider via a live upstream fetch (bypasses MC\'s local cache because the cache can\'t store per-provider variants for the same market). Example: Mining Manager via Janice for Jita (tax accuracy) while Structure Manager continues through Fuzzwork. Each plugin\'s override is independent.</td>
+                <td style="padding:6px 10px;">Use the <strong>Provider Override</strong> dropdown on the plugin\'s row in Pricing Preferences. Default "Use market\'s provider" reads MC\'s cached prices populated via the per-market routing. Picking a specific provider gives THIS plugin that provider\'s prices, kept for it apart from the market\'s own and refreshed every 4 hours with them. Pricing Preferences won\'t save a provider that can\'t price the market. Example: Mining Manager via Janice for Jita (tax accuracy) while Structure Manager continues through Fuzzwork. Each plugin\'s override is independent. A plugin can also ask for a provider itself, and get that provider\'s prices kept and refreshed for it: see <em>Prices through a provider a plugin names</em> above.</td>
             </tr>
         </tbody>
     </table>',
 
+    'pricing_variants_title' => 'Prices through a provider a plugin names',
+    'pricing_variants_body' => '<p>A plugin can ask for an item\'s price at a market through a provider it names, next to the market\'s own price. A market page can show Jita through Janice and through Fuzzwork side by side, say, while every other plugin reading Jita keeps getting Jita\'s own provider. Each plugin asks for what it needs; there is nothing to set up here. A provider you pick for a plugin on <strong>Pricing Preferences</strong> is kept the same way, under that plugin\'s name.</p>
+    <ul>
+        <li><strong>Kept apart from the market\'s prices.</strong> They are stored in a table of their own, one row per item, market and provider, shared by every plugin that asks for the same three. The market\'s own prices, and every plugin reading them, are not touched.</li>
+        <li><strong>Refreshed on the same schedule.</strong> Every 4 hours, one fetch per market and provider, and never more often than the provider allows: half an hour, or an hour for Janice. Through the market\'s own provider, the market\'s own refresh fetches the item once for both. Asking for newer prices in between is open only to a plugin Manager Core lets do so.</li>
+        <li><strong>Nothing stands in.</strong> A plugin that names a provider gets that provider\'s price, or its last one with its age. The fallback provider stands in for a market\'s own prices only.</li>
+        <li><strong>Only where the provider prices the place.</strong> Fuzzwork and Janice would price anywhere off the five hubs at Jita 4-4, so they are refused at any other market, and MCPraisal reads a structure only for a market set to MCPraisal. Janice still needs its key under Settings.</li>
+        <li><strong>Cleaned up after a week.</strong> A price no plugin asks for any more is deleted by the daily cleanup once it is 7 days old.</li>
+    </ul>
+    <p><strong>Diagnostics &rarr; Subscriptions &rarr; Check Health</strong> lists each market and provider plugins ask for. The Master Test warns about one at a disabled market, one whose provider can\'t price the place or isn\'t set up, and one with no price yet or none newer than two scheduled refreshes.</p>',
+
     'pricing_provider_override_title' => 'Per-plugin provider override (advanced)',
-    'pricing_provider_override_html' => '<p>Each row on the Pricing Preferences page has three editable fields: <strong>Market</strong>, <strong>Price Type</strong>, and <strong>Provider Override</strong> (the last added 2026-05-29).</p>
+    'pricing_provider_override_html' => '<p>Each row on the Pricing Preferences page has three editable fields: <strong>Market</strong>, <strong>Price Type</strong>, and <strong>Provider Override</strong>.</p>
     <p>The override exists for the case where you want different consumer plugins to read the same market through different providers. Two real-world scenarios:</p>
     <ul>
         <li><strong>Mining Manager via Janice for Jita.</strong> Tax accuracy: Janice\'s order-book curation often gives a tighter "real" sell price than Fuzzwork\'s aggregate, which matters for tax-due-amount calculations. Other plugins reading Jita don\'t need that fidelity and stay on Fuzzwork.</li>
-        <li><strong>Structure Manager Fuel Economics via MCPraisal for fresh CCP data</strong> while everything else stays on Fuzzwork. Fresh data matters more for fuel-shortage projections.</li>
+        <li><strong>Structure Manager Fuel Economics via MCPraisal for prices worked out from CCP\'s own order book</strong> while everything else stays on Fuzzwork.</li>
     </ul>
     <p><strong>How resolution works (4 layers):</strong></p>
     <ol>
@@ -222,8 +234,9 @@ return [
         <li>Per-market <code>provider</code> column on <code>manager_core_markets</code> wins for everyone else.</li>
         <li>Hard-coded <code>fuzzwork</code> fail-safe (only fires if a market row has no provider set, which shouldn\'t happen).</li>
     </ol>
-    <p><strong>When the override provider fails</strong> outright, the fallback provider is asked for the same market, as it would be for the market\'s own provider, and anything still missing comes back at the last price MC has cached for that market. An item the override provider answers with no price stays unpriced. Either one comes back as the price alone, the lowest sell and the highest buy in every figure, the way Janice answers, so a plugin reading the lowest figure on each side still gets the highest buy.</p>
-    <p><strong>Cache impact:</strong> when a plugin has an override set, MC bypasses its local cache and does a live upstream fetch on every read. Consumer plugins typically have their own local cache that absorbs the per-read cost. Janice is asked for up to 100 types per request, a couple of seconds apart, so MM\'s scheduled refresh of a few hundred types is a handful of requests.</p>
+    <p><strong>Kept and refreshed with the market.</strong> MC keeps the override provider\'s prices for the plugin, apart from the market\'s own, and refreshes them every 4 hours with the rest. A read asks the provider only for an item with no kept price, or one older than 8 hours (two missed refreshes), and an item the provider answers with no price is asked for again 15 minutes later at the soonest. Saving an override asks once for the items the plugin already subscribes to at that market, so its first reads find them. Changing the row or resetting it stops keeping prices for the plugin through the old provider.</p>
+    <p><strong>Only a provider that can price the market.</strong> Pricing Preferences won\'t save one that can\'t, and greys it out in the dropdown for the market picked: Fuzzwork and Janice would price anywhere off the five hubs at Jita 4-4, and MCPraisal reads a structure only for a market set to MCPraisal. An override saved before this update that can\'t price its market reads the market\'s own prices instead, the row\'s Status says so, and the <strong>Provider overrides</strong> check on Diagnostics warns about it until you change it. Picking the market\'s own provider reads the market\'s prices, which are that provider\'s already.</p>
+    <p><strong>When the override provider fails</strong> outright, the fallback provider is asked for the same market, as it would be for the market\'s own provider, and anything still missing comes back at the last price MC has cached for that market. Neither is kept as the override provider\'s price, so the provider is asked again on the next read. An item the override provider answers with no price stays unpriced. A stand-in comes back as the price alone, the lowest sell and the highest buy in every figure, the way Janice answers, so a plugin reading the lowest figure on each side still gets the highest buy.</p>
     <p><strong>Credentials are still global.</strong> One Janice API key per install, configurable in Settings. Override just decides WHICH plugin uses it.</p>',
 
     // Appraisal System
@@ -264,6 +277,7 @@ return [
     'bridge_features_title' => 'Bridge Features',
     'bridge_features_list' => '<ul>
         <li><strong>Visual ecosystem map:</strong> Circuit-board style view with Manager Core at the center and each detected plugin as a node</li>
+        <li><strong>Ecosystem simulation:</strong> The what-if map on its own tab. Click a plugin to see what the rest would lose without it, compatible plugins included</li>
         <li><strong>Status indicators:</strong> Three states — active (integrating), installed (loaded but no integration yet), inactive (not loadable / not installed)</li>
         <li><strong>Capability registry:</strong> Each plugin advertises named functions (e.g. <code>pricing.getPrice</code>, <code>events.subscribe</code>); other plugins call them via <code>PluginBridge::call($capability, $args)</code></li>
         <li><strong>Self-introspection:</strong> The bridge exposes <code>bridge.discoverCapabilities</code> so any plugin can enumerate what is currently callable</li>
@@ -278,7 +292,7 @@ return [
     'status_grey' => 'Inactive (gray) — plugin service-provider class not loadable (not installed via composer, or installation incomplete)',
 
     'compatible_plugins_title' => 'Compatible Plugins',
-    'compatible_plugins_desc' => 'A plugin from outside the suite that registers itself with the Plugin Bridge (<code>registerSelf()</code>) gets a Compatible Plugins table of its own on the Plugin Bridge page, under the Plugin Registry: its state, version, integrations, last activity and when it was last seen, with the same expandable details. Diagnostics lists it under Compatible plugins on the Plugin Connections tab, and Test All Plugins covers it. The ecosystem map and the Plugin Registry list the suite only.',
+    'compatible_plugins_desc' => 'A plugin from outside the suite that registers itself with the Plugin Bridge (<code>registerSelf()</code>) gets a Compatible Plugins table of its own on the Plugin Bridge page, under the Plugin Registry: its state, version, integrations, last activity and when it was last seen, with the same expandable details. Diagnostics lists it under Compatible plugins on the Plugin Connections tab, and Test All Plugins covers it. The live ecosystem map and the Plugin Registry list the suite only. The Ecosystem simulation draws up to three of them in its Compatible band, with what each would lose without Manager Core.',
 
     'connected_plugins_title' => 'Connected Plugins',
     'connected_plugins_desc' => 'The following plugins can integrate with Manager Core:',
@@ -585,7 +599,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
         <li><strong>Overview:</strong> price record count, subscriptions, active plugins, event subscriptions, API tokens, current price provider</li>
         <li><strong>Plugin Connections:</strong> per-plugin status (active/installed/inactive), integration breakdown (pricing subs / event subs / ESI handlers / events published 24h / capabilities)</li>
         <li><strong>Price Providers:</strong> live test of the configured provider — fetches real prices for 6 mineral types and reports response time + success rate</li>
-        <li><strong>Subscriptions:</strong> currently subscribed type IDs, grouped by plugin and market</li>
+        <li><strong>Subscriptions:</strong> currently subscribed type IDs, grouped by plugin and market. <em>Check Health</em> also lists each market and provider plugins ask for prices through by name: who asks, how many items have a price, the newest one and how the last fetch went</li>
         <li><strong>Event Bus:</strong> active subscriptions list, recent events with status, statistics</li>
         <li><strong>Capabilities:</strong> every callable bridge capability across all plugins (uses <code>bridge.discoverCapabilities</code> introspection)</li>
         <li><strong>API Status:</strong> token count, recent usage, rate limit info</li>
@@ -621,7 +635,7 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'faq_a1' => 'Market prices are updated automatically by the scheduled task <code>manager-core:update-prices</code>, which runs every 4 hours by default (cron: <code>0 */4 * * *</code>). The interval is editable from the Settings page (Pricing tab → Update Frequency) and the schedule entry is updated live when you save.',
 
     'faq_q2' => 'Q2: Can I add custom markets?',
-    'faq_a2' => 'Yes, two ways. (1) Open <strong>Manager Core → Markets</strong> and click <em>Add Market</em>. For a player structure, keep <em>Citadel</em> and <em>MCPraisal (ESI)</em> and put the structure ID in the slug field; see <em>Markets + Pricing Providers</em> above. (2) For static hub defaults, edit <code>manager-core.config.php</code> under <code>pricing.markets</code>. DB markets take precedence over config defaults.',
+    'faq_a2' => 'Yes, two ways. (1) Open <strong>Manager Core → Markets</strong> and click <em>Add Market</em>. Search for the structure by its name, its system or its ID, and pick it; see <em>Markets + Pricing Providers</em> above. (2) For static hub defaults, edit <code>manager-core.config.php</code> under <code>pricing.markets</code>. DB markets take precedence over config defaults.',
 
     'faq_q3' => 'Q3: Are appraisals stored permanently?',
     'faq_a3' => 'Appraisals are stored in <code>manager_core_appraisals</code> indefinitely by default. To prune old ones, run <code>php artisan manager-core:cleanup</code> (or schedule it). Appraisal retention is intentionally manual so you do not lose audit trails by accident.',
@@ -698,9 +712,9 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     'watchdog_checks_body' => '<table style="width: 100%; color: #d1d5db; margin-bottom: 1rem;">
         <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);"><th style="padding: 8px; color: #9ca3af;">Check</th><th style="padding: 8px; color: #9ca3af;">Fires when</th></tr>
         <tr><td style="padding: 8px;"><code>eventbus_failures</code></td><td style="padding: 8px;">≥10 EventBus deliveries failed in the last 60 minutes (subscriber capabilities throwing, plugins missing handlers, malformed payloads).</td></tr>
-        <tr><td style="padding: 8px;"><code>price_cron_overdue</code></td><td style="padding: 8px;">Newest cached price is older than 2× the scheduled refresh interval. Indicates SeAT scheduler is dead, the update-prices command is throwing, or all providers are unreachable.</td></tr>
+        <tr><td style="padding: 8px;"><code>price_cron_overdue</code></td><td style="padding: 8px;">The scheduled price refresh has not stored a price for more than 2× its interval. Prices a plugin asks for between the scheduled runs do not count. Indicates SeAT scheduler is dead, the update-prices command is throwing, or all providers are unreachable.</td></tr>
         <tr><td style="padding: 8px;"><code>esi_fast_poll_failing</code></td><td style="padding: 8px;">≥80% of enabled ESI key holders have a non-success <code>last_poll_status</code>. CCP outage, every director\'s token expired simultaneously, or pool fully exhausted. Skipped when pool has &lt;3 enabled keys (single-key issues are operator-level).</td></tr>
-        <tr><td style="padding: 8px;"><code>provider_unavailable</code></td><td style="padding: 8px;">Any price provider used by an enabled market, or set as a plugin\'s provider override, reports <code>isAvailable=false</code>, or Janice turned its last request away (wrong or blocked key, or too many requests) or failed every request of it, or an enabled market\'s own provider failed its last refresh outright (the alert names the market, what failed and what stood in). Typically missing or refused credentials (Janice API key, SeAT prices-core sub-provider), a provider that is down, or a structure no Key Pool director can read. Saving a new Janice key clears the refusal, and the next fetch shows whether Janice takes the new one. A failing Janice is reported once when it starts and once, in green, when it answers again; the rest of this check repeats every hour while it lasts.</td></tr>
+        <tr><td style="padding: 8px;"><code>provider_unavailable</code></td><td style="padding: 8px;">Any price provider used by an enabled market, set as a plugin\'s provider override, or named by a plugin for its prices at a market, reports <code>isAvailable=false</code>, or Janice turned its last request away (wrong or blocked key, or too many requests) or failed every request of it, or an enabled market\'s own provider failed its last refresh outright (the alert names the market, what failed and what stood in). Typically missing or refused credentials (Janice API key, SeAT prices-core sub-provider), a provider that is down, or a structure no Key Pool director can read. Saving a new Janice key clears the refusal, and the next fetch shows whether Janice takes the new one. A failing Janice is reported once when it starts and once, in green, when it answers again; the rest of this check repeats every hour while it lasts.</td></tr>
         <tr><td style="padding: 8px;"><code>plugin_updates_available</code></td><td style="padding: 8px;">Any plugin in the suite has a new tagged release on Packagist that this install hasn\'t picked up yet. Batched alert lists every outdated plugin in one message; clickable title deep-links to MC → Plugin Bridge. <strong>7-day per-(plugin, version) cooldown</strong>, not the standard 1h — same release won\'t spam, but a NEW version cuts the cooldown immediately so you hear about it the next tick.</td></tr>
     </table>',
 
@@ -740,10 +754,30 @@ $eventBus->subscribe(\'seat-discord-pings\', \'buyback.completed\', \'onBuybackC
     // Recent changes: what the latest release changed that an operator can
     // see without reading the changelog. Cleared when the next What's New is
     // written.
-    'recent_changes_title' => 'In this update (1.1.0)',
-    'recent_changes_name' => 'The Ecosystem Era: Market Expansion',
+    'recent_changes_title' => 'In this update (1.2.0)',
+    'recent_changes_name' => 'The Ecosystem Era: Unlimited Price Provider Core',
     'recent_changes_body' => '<p>The changes in this release you will notice without going looking. <a href="https://github.com/MattFalahe/Manager-Core/blob/main/CHANGELOG.MD" target="_blank" rel="noopener">The changelog</a> has the complete record.</p>
     <h5>Prices</h5>
+    <ul>
+        <li><strong>Any plugin, any provider, any market.</strong> A plugin can ask for an item\'s price at a market through a provider it names, kept apart from the market\'s own price, so the same item at the same market can be priced by two providers side by side. Plugins start using it in their own releases. <strong>Diagnostics &rarr; Subscriptions &rarr; Check Health</strong> lists what they ask for, and Help &rarr; Pricing says how it works.</li>
+        <li><strong>A provider override on Pricing Preferences reads kept prices.</strong> It asked the provider on every read. Its prices are now kept for the plugin and refreshed every 4 hours, and Pricing Preferences won\'t save a provider that can\'t price the market. An override saved before the update that can\'t reads the market\'s own prices, and its row and Diagnostics say so.</li>
+        <li><strong>Disabling a hub stops its refresh.</strong> Disable on Jita, Amarr, Dodixie, Hek or Rens changed the badge and nothing else. A disabled hub is now left alone like any other disabled market, so if a plugin still reads a hub you disabled, enable it again on the <strong>Markets</strong> page. Pricing Preferences marks a disabled market.</li>
+        <li><strong>Janice prices Rens, Dodixie and Hek at their own stations</strong>, where it priced them at Jita 4-4, so expect those prices to move from the first refresh after the update.</li>
+        <li><strong>Testing a provider no longer changes a market\'s prices.</strong> Test on Diagnostics, or a provider picked on an appraisal, put that provider\'s prices in for every plugin reading the market until the next refresh. They answer the test or the appraisal alone now, MCPraisal included.</li>
+        <li><strong>New items get their first price within a minute.</strong> Items a plugin subscribed to within 30 seconds of another subscribe at the same market could wait up to 4 hours for one.</li>
+    </ul>
+    <h5>Markets</h5>
+    <ul>
+        <li><strong>The Markets page shows what each provider can do.</strong> Every hub lists the providers that can price it and the ones that can\'t, with the reason when you hover one, and citadel markets are grouped by the provider that prices them.</li>
+        <li><strong>Add Market finds the place for you.</strong> Type a structure\'s name, its system or its ID, or a system or region, and pick it from the list: the name, key and IDs fill themselves in, and only a provider that can price the place can be picked, so a market Fuzzwork or Janice would price at Jita 4-4 can\'t be added. A new market\'s key is 32 characters at most, so every plugin can pick it on Pricing Preferences.</li>
+    </ul>
+    <h5>Plugin Bridge and Help</h5>
+    <ul>
+        <li><strong>A new ecosystem simulation.</strong> The what-if map on the Plugin Bridge\'s Ecosystem simulation tab and in Help is drawn again with Manager Core as the hub: each plugin of the family has a spoke to it, since everything they send each other goes through it, and a Compatible band shows the plugins from outside the suite that registered with Manager Core on this server. Click Manager Core to see what each would lose.</li>
+        <li><strong>The menu works after a search.</strong> Clearing a search left every section but the open one blank until the page was reloaded.</li>
+    </ul>',
+    'recent_changes_earlier_summary' => 'Earlier in v1: 1.1.0, The Ecosystem Era: Market Expansion',
+    'recent_changes_earlier_body' => '<h5>Prices</h5>
     <ul>
         <li><strong>Citadel markets read through ESI.</strong> Any structure a director in your ESI Key Pool can dock at can be a market now: add it on the <strong>Markets</strong> page with its structure ID in the slug field. The director\'s token needs the <code>esi-markets.structure_markets.v1</code> scope. Adding your own markets is back, with Edit and Delete for the ones you add.</li>
         <li><strong>Another provider stands in when one fails.</strong> When a market\'s provider fails a refresh outright, a fallback provider prices the same market: Fuzzwork unless you pick another under <strong>Settings &rarr; Pricing &rarr; Fallback Provider</strong>. Whatever nothing can price keeps its last price. Each market\'s row on the Markets page says how its provider did on the last refresh.</li>

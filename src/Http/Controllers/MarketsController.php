@@ -6,8 +6,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use ManagerCore\Models\ESI\EsiKeyHolder;
 use ManagerCore\Models\Market;
 use ManagerCore\Services\ESI\MarketDataService;
+use ManagerCore\Services\MarketPlaces;
+use ManagerCore\Services\PriceProviders\FuzzworkPriceProvider;
+use ManagerCore\Services\PriceProviders\JanicePriceProvider;
+use ManagerCore\Services\PricingService;
 use Seat\Web\Http\Controllers\Controller;
 
 /**
@@ -38,18 +43,31 @@ class MarketsController extends Controller
      */
     protected const VALID_PROVIDERS = ['esi', 'janice', 'fuzzwork', 'goonpraisal', 'seat'];
 
+    /** The order citadel markets are grouped in, by provider. */
+    protected const CITADEL_GROUPS = ['goonpraisal', 'esi', 'janice', 'fuzzwork', 'seat'];
+
     /**
      * GET /manager-core/markets
+     *
+     * Hubs show what every provider can do there. Citadel markets are
+     * grouped by the provider that prices them.
      */
-    public function index()
+    public function index(PricingService $pricing)
     {
-        $hubs = Market::where('market_type', Market::TYPE_HUB)
-            ->orderBy('name')
-            ->get();
+        $markets = Market::orderBy('name')->get();
+        $rows = $markets->map(fn (Market $market) => $market->toArray())->all();
+        $places = new MarketPlaces($pricing, $rows);
+        $names = $places->rowNames($rows);
+        $listed = $pricing->listMarkets(false);
+        $readers = $this->readersByProvider();
+        $keyPool = $this->keyPoolSize();
 
-        $citadels = Market::where('market_type', Market::TYPE_CITADEL)
-            ->orderBy('name')
-            ->get();
+        $chips = [];
+        $where = [];
+        foreach ($markets as $market) {
+            $chips[$market->key] = MarketPlaces::chips($market->name, $listed[$market->key]['providers'] ?? [], $readers[$market->key] ?? []);
+            $where[$market->key] = $this->placeLine($market, $names);
+        }
 
         // Per-plugin counts for the "this market is used by N plugins"
         // display column. Helps operators avoid deleting markets still
@@ -59,26 +77,52 @@ class MarketsController extends Controller
             ->groupBy('market')
             ->pluck('plugin_count', 'market');
 
-        return view('manager-core::markets.index', compact('hubs', 'citadels', 'pluginPreferences'));
+        return view('manager-core::markets.index', [
+            'hubs' => $markets->where('market_type', Market::TYPE_HUB)->values(),
+            'citadelGroups' => $this->citadelGroups($markets->where('market_type', Market::TYPE_CITADEL)),
+            'tiles' => $this->providerTiles($markets, $places, $keyPool),
+            'chips' => $chips,
+            'where' => $where,
+            'keyPool' => $keyPool,
+            'pluginPreferences' => $pluginPreferences,
+        ]);
+    }
+
+    /**
+     * GET /manager-core/markets/places
+     *
+     * Suggestions for the Add and Edit form, from SeAT's own tables: with
+     * `q`, the places matching it; without, the one place the fields name.
+     */
+    public function places(Request $request, PricingService $pricing)
+    {
+        $places = $this->placeFinder($pricing, (int) $request->query('market_id', 0) ?: null);
+        $type = $request->query('type') === Market::TYPE_HUB ? Market::TYPE_HUB : Market::TYPE_CITADEL;
+
+        if ($request->filled('q')) {
+            $results = $places->search($type, mb_substr((string) $request->query('q'), 0, 64), $request->query('only') === 'system' ? 'system' : null);
+
+            return response()->json(['results' => $results, 'note' => $places->note()]);
+        }
+
+        $place = $places->resolve(['market_type' => $type]
+            + $request->only(['provider_slug', 'structure_id', 'structure_name', 'system_id', 'system_name', 'region_id']));
+
+        return response()->json(['place' => $place, 'note' => $places->note()]);
     }
 
     /**
      * GET /manager-core/markets/create
      *
-     * Opens on a citadel market read through ESI, the case that needs no
-     * third-party provider: any structure a Key Pool director can dock at.
+     * Opens on a citadel market, the case the form's search helps with
+     * most: a structure found by its name.
      */
-    public function create()
+    public function create(PricingService $pricing)
     {
-        return view('manager-core::markets.form', [
-            'market' => new Market([
-                'market_type' => Market::TYPE_CITADEL,
-                'provider' => 'esi',
-                'is_enabled' => true,
-            ]),
-            'providers' => $this->providerOptions(),
-            'isNew' => true,
-        ]);
+        return $this->form(new Market([
+            'market_type' => Market::TYPE_CITADEL,
+            'is_enabled' => true,
+        ]), true, $pricing);
     }
 
     /**
@@ -104,6 +148,10 @@ class MarketsController extends Controller
             ]);
         }
 
+        if ($placeError = self::placeError($validated, $validated['key'])) {
+            return back()->withInput()->withErrors($placeError);
+        }
+
         $validated['is_custom'] = true;
         $validated['system_ids'] = !empty($validated['system_id']) ? [(int) $validated['system_id']] : [];
 
@@ -117,7 +165,7 @@ class MarketsController extends Controller
     /**
      * GET /manager-core/markets/{id}/edit
      */
-    public function edit(int $id)
+    public function edit(int $id, PricingService $pricing)
     {
         $market = Market::findOrFail($id);
 
@@ -127,11 +175,7 @@ class MarketsController extends Controller
                 ->with('error', 'Default markets cannot be edited. Disable them via the enable toggle if needed.');
         }
 
-        return view('manager-core::markets.form', [
-            'market' => $market,
-            'providers' => $this->providerOptions(),
-            'isNew' => false,
-        ]);
+        return $this->form($market, false, $pricing);
     }
 
     /**
@@ -153,6 +197,10 @@ class MarketsController extends Controller
             return back()->withInput()->withErrors([
                 'region_id' => "Region ID is required. It couldn't be worked out from the structure.",
             ]);
+        }
+
+        if ($placeError = self::placeError($validated, $market->key)) {
+            return back()->withInput()->withErrors($placeError);
         }
 
         // Plugins' pricing preferences point at the key, so it never changes.
@@ -331,7 +379,7 @@ class MarketsController extends Controller
     {
         $rules = [
             'name'           => 'required|string|max:255',
-            'key'            => 'nullable|string|max:64|regex:/^[a-z0-9-_]+$/',
+            'key'            => 'nullable|string|max:' . Market::KEY_MAX_LENGTH . '|regex:/^[a-z0-9-_]+$/',
             'market_type'    => 'required|in:hub,citadel',
             'is_enabled'     => 'nullable|boolean',
             'provider'       => ['required', 'string', 'in:' . implode(',', self::VALID_PROVIDERS)],
@@ -342,6 +390,12 @@ class MarketsController extends Controller
             'system_name'    => 'nullable|string|max:64',
             'structure_name' => 'nullable|string|max:255',
         ];
+
+        // A saved market keeps its key, whatever its length: the edit form
+        // posts it back read-only and update() never stores it.
+        if ($existing !== null) {
+            unset($rules['key']);
+        }
 
         // A citadel market read through ESI is found by its structure ID.
         if ($request->input('market_type') === Market::TYPE_CITADEL && $request->input('provider') === 'esi') {
@@ -363,6 +417,35 @@ class MarketsController extends Controller
     }
 
     /**
+     * Fuzzwork and Janice price a fixed list of places and price anything
+     * else at Jita 4-4 without saying so, so a market they would price that
+     * way is refused, with what to do instead. Janice reads its place from
+     * the slug, then the key; Fuzzwork from the key alone, and the five hub
+     * keys are the seeded markets.
+     *
+     * @return array<string, string>|null the field and message, or null when fine
+     */
+    public static function placeError(array $data, string $key): ?array
+    {
+        $provider = $data['provider'] ?? null;
+
+        if ($provider === 'fuzzwork' && !FuzzworkPriceProvider::tracksMarket($key)) {
+            return ['provider' => 'Fuzzwork prices only the five trade hubs (Jita, Amarr, Dodixie, Hek and Rens), '
+                . 'which are already on the list, and prices any other market at Jita 4-4. '
+                . 'Pick MCPraisal (ESI) for this market, or Janice with the hub in the slug field.'];
+        }
+
+        if ($provider === 'janice'
+            && !JanicePriceProvider::tracksMarket((string) ($data['provider_slug'] ?? ''))
+            && !JanicePriceProvider::tracksMarket($key)) {
+            return ['provider_slug' => 'Janice prices only the five trade hubs. Put jita, amarr, dodixie, hek or rens '
+                . 'in the Provider Market Slug field, or Janice prices this market at Jita 4-4.'];
+        }
+
+        return null;
+    }
+
+    /**
      * Key for a new market left without one: the structure (or display)
      * name, led by its system unless the name already starts with it, as
      * SeAT's structure names do ("C-J6MT - 1st Taj Mahgoon").
@@ -376,7 +459,7 @@ class MarketsController extends Controller
             $label = $system . ' ' . $label;
         }
 
-        return Str::slug($label);
+        return Market::fitKey(Str::slug($label));
     }
 
     /**
@@ -416,48 +499,206 @@ class MarketsController extends Controller
     }
 
     /**
-     * Provider options for the dropdown. Each entry knows whether it's
-     * available right now (e.g. Janice without an API key is disabled).
-     * Shape: [ key => ['label' => string, 'available' => bool, 'note' => string] ]
+     * The Add or Edit form, opened on the place the market (or the input a
+     * refused save sent back) names, read from SeAT's tables.
      */
-    protected function providerOptions(): array
+    protected function form(Market $market, bool $isNew, PricingService $pricing)
     {
-        $opts = [
+        $places = $this->placeFinder($pricing, $isNew ? null : $market->id);
+
+        $fields = [
+            'market_type' => old('market_type', $market->market_type),
+            'provider_slug' => old('provider_slug', $market->provider_slug),
+            'structure_name' => old('structure_name', $market->structure_name),
+            'system_id' => old('system_id', $market->system_id ?: ($market->system_ids[0] ?? null)),
+            'system_name' => old('system_name', $market->system_name),
+            'region_id' => old('region_id', $market->region_id),
+        ];
+
+        $named = !$isNew || old('provider_slug') || old('system_id') || old('region_id');
+        $place = $named ? $places->resolve($fields) : null;
+
+        return view('manager-core::markets.form', [
+            'market' => $market,
+            'isNew' => $isNew,
+            'fields' => $fields,
+            'place' => $place,
+            'note' => $places->note(),
+            'unplaced' => $places->unplaced(),
+            'savedProvider' => $isNew ? null : $market->provider,
+            'provider' => old('provider', $isNew ? ($place['provider'] ?? null) : $market->provider),
+        ]);
+    }
+
+    protected function placeFinder(PricingService $pricing, ?int $editing): MarketPlaces
+    {
+        return new MarketPlaces($pricing, Market::all()->map(fn (Market $market) => $market->toArray())->all(), $editing);
+    }
+
+    /**
+     * The plugins reading each market through a provider they name, by
+     * market and provider: a provider override on a plugin's pricing
+     * preference, or prices it subscribes to through that provider.
+     *
+     * @return array<string, array<string, string[]>>
+     */
+    protected function readersByProvider(): array
+    {
+        $readers = [];
+
+        try {
+            $overrides = DB::table('manager_core_pricing_preferences')
+                ->whereNotNull('provider_override')
+                ->where('provider_override', '<>', '')
+                ->get(['plugin_key', 'market', 'provider_override']);
+
+            foreach ($overrides as $row) {
+                $readers[$row->market][strtolower(trim($row->provider_override))][] = self::pluginName($row->plugin_key);
+            }
+
+            $variants = DB::table('manager_core_variant_subscriptions')
+                ->select('plugin_name', 'market', 'provider')
+                ->distinct()
+                ->get();
+
+            foreach ($variants as $row) {
+                $readers[$row->market][strtolower(trim($row->provider))][] = self::pluginName($row->plugin_name);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('[Manager Core] Markets: could not read which plugins name a provider: ' . $e->getMessage());
+        }
+
+        return $readers;
+    }
+
+    protected static function pluginName(string $key): string
+    {
+        $name = config("manager-core.bridge.compatible_plugins.{$key}.name");
+
+        return is_string($name) && $name !== '' ? $name : ucwords(str_replace(['-', '_'], ' ', $key));
+    }
+
+    /** Directors in the ESI Key Pool, or null when the pool can't be read. */
+    protected function keyPoolSize(): ?int
+    {
+        try {
+            return EsiKeyHolder::where('enabled', true)->count();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Where a market is, in words: a Goonpraisal market by the system its
+     * code names, otherwise the structure's type for one read through ESI,
+     * then its systems and region by name.
+     */
+    protected function placeLine(Market $market, array $names): string
+    {
+        $code = $market->provider === 'goonpraisal' ? MarketPlaces::goonpraisalCode((string) $market->provider_slug) : null;
+        if ($code !== null && isset($names['codes'][$code])) {
+            return $names['codes'][$code];
+        }
+
+        $systemIds = array_filter(array_map('intval', (array) ($market->system_ids ?: [$market->system_id])));
+        $systems = array_map(fn ($id) => $names['systems'][$id] ?? "system {$id}", $systemIds);
+        if (empty($systems) && $market->system_name) {
+            $systems = [$market->system_name];
+        }
+
+        $region = $market->region_id ? ($names['regions'][$market->region_id] ?? "region {$market->region_id}") : null;
+        $type = $market->isStructureMarket() ? ($names['structures'][Market::structureIdFromSlug($market->provider_slug)] ?? null) : null;
+
+        return implode(' · ', array_filter([$type, implode(', ', array_filter([implode(', ', $systems), $region]))]));
+    }
+
+    /**
+     * Citadel markets by the provider that prices them. Goonpraisal's and
+     * MCPraisal's groups always show, as the two ways to price a citadel;
+     * any other only when a market uses it.
+     *
+     * @return array<string, array{label: string, intro: string, markets: \Illuminate\Support\Collection, enabled: int}>
+     */
+    protected function citadelGroups($citadels): array
+    {
+        $intros = [
+            'goonpraisal' => 'Goonpraisal tracks these Imperium markets and prices them with no token needed. Enable the ones your alliance trades at.',
+            'esi' => 'Read straight from the structure through the ESI Key Pool, as a director who can dock there with the esi-markets.structure_markets.v1 scope.',
+            'janice' => 'Priced by Janice at the trade hub each one\'s slug names.',
+            'fuzzwork' => 'Fuzzwork prices only the five trade hubs, so it prices these at Jita 4-4. Edit each one to a provider that prices its place.',
+            'seat' => 'A SeAT price provider gives one price for every place, not the market\'s own.',
+        ];
+
+        $byProvider = $citadels->groupBy(fn (Market $market) => (string) $market->provider);
+        $order = array_unique(array_merge(self::CITADEL_GROUPS, $byProvider->keys()->all()));
+        $groups = [];
+
+        foreach ($order as $provider) {
+            $markets = $byProvider->get($provider, collect())->values();
+            if ($markets->isEmpty() && !in_array($provider, ['goonpraisal', 'esi'], true)) {
+                continue;
+            }
+
+            $groups[$provider] = [
+                'label' => MarketPlaces::LABELS[$provider] ?? ($provider !== '' ? $provider : 'No provider'),
+                'intro' => $intros[$provider] ?? "Manager Core has no provider called '{$provider}'. Edit these to one it has.",
+                'markets' => $markets,
+                'enabled' => $markets->where('is_enabled', true)->count(),
+            ];
+        }
+
+        return $groups;
+    }
+
+    /**
+     * One tile per provider for the top of the page: what it covers, whether
+     * it is set up, and how many enabled markets it prices as their own.
+     *
+     * @return array<string, array{label: string, covers: string, state: string, status: string, link: ?string, markets: int}>
+     */
+    protected function providerTiles($markets, MarketPlaces $places, ?int $keyPool): array
+    {
+        $own = $markets->where('is_enabled', true)->countBy(fn (Market $market) => (string) $market->provider);
+        $janice = $places->available('janice');
+        $seat = $places->available('seat');
+
+        $tiles = [
             'esi' => [
-                'label' => 'MCPraisal (ESI)',
-                'available' => true,
-                'note' => 'Hub markets: the public region order book, no auth needed. Citadel markets: reads the structure\'s whole market as an ESI Key Pool director who can dock there. Put the structure ID in the slug field.',
-            ],
-            'fuzzwork' => [
-                'label' => 'Fuzzwork',
-                'available' => true,
-                'note' => 'Community aggregator; hub markets only. No auth.',
-            ],
-            'janice' => [
-                'label' => 'Janice',
-                'available' => false,
-                'note' => 'Appraisal service; needs API key configured in Settings.',
+                'covers' => 'Any region\'s public market, and any structure a Key Pool director can dock at.',
+                'state' => $keyPool === 0 ? 'setup' : 'ok',
+                'status' => $keyPool === null ? 'Ready' : ($keyPool === 0 ? 'No directors in the Key Pool' : $keyPool . ' ' . ($keyPool === 1 ? 'director' : 'directors') . ' in the Key Pool'),
+                'link' => route('manager-core.esi-key-pool.index'),
             ],
             'goonpraisal' => [
-                'label' => 'Goonpraisal',
-                'available' => true,
-                'note' => 'Imperium nullsec hubs (C-J6MT, GB-6X5, UALX-3, etc.). No auth needed; respectful rate-limit applies.',
+                'covers' => 'Jita, Amarr, Dodixie and ' . count(MarketPlaces::goonpraisalCodes()) . ' Imperium citadel markets.',
+                'state' => 'ok',
+                'status' => 'Ready, no token needed',
+                'link' => null,
+            ],
+            'janice' => [
+                'covers' => 'The five trade hubs, each at its station.',
+                'state' => $janice ? 'ok' : 'setup',
+                'status' => $janice ? 'API key set' : 'No API key',
+                'link' => route('manager-core.settings') . '#pricing',
+            ],
+            'fuzzwork' => [
+                'covers' => 'The five trade hubs, each at its station.',
+                'state' => 'ok',
+                'status' => 'Ready, no token needed',
+                'link' => null,
             ],
             'seat' => [
-                'label' => 'SeAT Price Provider',
-                'available' => false,
-                'note' => 'seat-prices-core plugin; install + select one in Settings.',
+                'covers' => 'One price for every place, from SeAT\'s own price provider.',
+                'state' => $seat ? 'ok' : 'no',
+                'status' => $seat ? 'Installed' : 'Not installed',
+                'link' => null,
             ],
         ];
 
-        // Reflect actual availability based on each provider's isAvailable().
-        try {
-            $opts['janice']['available'] = (new \ManagerCore\Services\PriceProviders\JanicePriceProvider())->isAvailable();
-        } catch (\Throwable $e) { /* leave false */ }
-        try {
-            $opts['seat']['available'] = (new \ManagerCore\Services\PriceProviders\SeatPriceProvider())->isAvailable();
-        } catch (\Throwable $e) { /* leave false */ }
+        foreach ($tiles as $provider => $tile) {
+            $tiles[$provider] += ['label' => MarketPlaces::LABELS[$provider], 'markets' => (int) ($own[$provider] ?? 0)];
+        }
 
-        return $opts;
+        return $tiles;
     }
 }

@@ -241,6 +241,60 @@ class SourceTest extends TestCase
         }
     }
 
+    /** A view that isn't there is a 500 on every visit, and nothing else says so. */
+    public function test_every_view_a_page_returns_exists(): void
+    {
+        $views = [];
+        foreach (self::files('.php') as $path) {
+            preg_match_all("/view\\('manager-core::([a-z0-9_.-]+)'/", file_get_contents($path), $found);
+            $views = array_merge($views, $found[1]);
+        }
+
+        $this->assertNotEmpty($views);
+        foreach (array_unique($views) as $view) {
+            $this->assertFileExists(self::SRC . 'Resources/views/' . str_replace('.', '/', $view) . '.blade.php', $view);
+        }
+    }
+
+    /**
+     * The Plugin Bridge map places a plugin by its place in the list, so one
+     * added without a place of its own is drawn on top of Manager Core. One
+     * listed only where it is installed has to come last, or leaving it out
+     * would move the plugins after it.
+     */
+    public function test_every_suite_plugin_has_a_place_on_the_bridge_map(): void
+    {
+        $plugins = config('manager-core.bridge.compatible_plugins');
+        preg_match_all('/\.plugin-node:nth-child\((\d+)\)\s*\{[^}]*\b(?:top|bottom)\s*:/', file_get_contents(self::SRC . 'Resources/assets/css/plugin-bridge.css'), $placed);
+
+        $this->assertSame(range(1, count($plugins)), array_map('intval', $placed[1]));
+
+        $optional = array_keys(array_filter($plugins, fn ($plugin) => !empty($plugin['only_when_installed'])));
+        $this->assertNotEmpty($optional);
+        $this->assertSame($optional, array_slice(array_keys($plugins), -count($optional)));
+    }
+
+    /** A route to a method that isn't there is a 500 on every visit. */
+    public function test_every_route_names_a_public_method_of_its_controller(): void
+    {
+        $controllers = [];
+        foreach (self::files('Controller.php', 'Http/Controllers') as $path) {
+            $controllers[basename($path, '.php')] = file_get_contents($path);
+        }
+
+        $routes = 0;
+        foreach (['Http/routes.php', 'Http/api_routes.php'] as $file) {
+            preg_match_all("/'([A-Za-z]+Controller)@([A-Za-z_]+)'/", file_get_contents(self::SRC . $file), $found, PREG_SET_ORDER);
+            foreach ($found as [, $controller, $method]) {
+                $routes++;
+                $this->assertArrayHasKey($controller, $controllers, "$file: $controller");
+                $this->assertMatchesRegularExpression("/public function $method\\s*\\(/", $controllers[$controller], "$file: $controller@$method");
+            }
+        }
+
+        $this->assertGreaterThan(20, $routes);
+    }
+
     public function test_the_readme_covers_every_command_and_names_none_that_is_gone(): void
     {
         $readme = file_get_contents(self::ROOT . 'README.md');

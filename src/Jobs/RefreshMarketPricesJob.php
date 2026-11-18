@@ -25,7 +25,9 @@ use ManagerCore\Services\PricingService;
  * prices via the same `updatePrices` path the scheduled cron uses.
  *
  * PricingService also queues it, ten minutes on, for the types a refresh
- * failed to fetch (see $retry).
+ * failed to fetch (see $retry), for the end of a debounce window when
+ * a plugin subscribed inside it (see $waiting), and when a plugin asks for
+ * prices it finds too old between scheduled refreshes (see $requestedBy).
  *
  * Idempotency:
  *   - Multiple dispatches for overlapping type sets just refetch the same
@@ -72,18 +74,40 @@ class RefreshMarketPricesJob implements ShouldQueue
     public bool $retry = false;
 
     /**
-     * @param string $market   Market identifier (jita, amarr, dodixie, hek, rens)
-     * @param int[]  $typeIds  Type IDs to refresh — typically the new/missing
-     *                         subset returned by registerTypes' diff.
-     * @param bool   $retry    True for the one more try after a failed fetch,
-     *                         which never queues another.
+     * The fetch queued for the end of a debounce window. It carries no type
+     * IDs: plugins subscribing inside the window leave theirs waiting, and
+     * it takes whichever are waiting when it runs. A plain property for the
+     * same reason as $retry.
+     */
+    public bool $waiting = false;
+
+    /**
+     * The plugin that asked for these types to be fetched again between the
+     * scheduled refreshes, or null for every other fetch. A plain property
+     * for the same reason as $retry.
+     */
+    public ?string $requestedBy = null;
+
+    /**
+     * @param string      $market      Market identifier (jita, amarr, dodixie, hek, rens)
+     * @param int[]       $typeIds     Type IDs to refresh — typically the new/missing
+     *                                 subset returned by registerTypes' diff.
+     * @param bool        $retry       True for the one more try after a failed fetch,
+     *                                 which never queues another.
+     * @param bool        $waiting     True for the fetch of the types left waiting.
+     * @param string|null $requestedBy The plugin a fetch between scheduled
+     *                                 refreshes is for.
      */
     public function __construct(
         public string $market,
         public array $typeIds,
-        bool $retry = false
+        bool $retry = false,
+        bool $waiting = false,
+        ?string $requestedBy = null
     ) {
         $this->retry = $retry;
+        $this->waiting = $waiting;
+        $this->requestedBy = $requestedBy;
     }
 
     /**
@@ -91,6 +115,12 @@ class RefreshMarketPricesJob implements ShouldQueue
      */
     public function handle(PricingService $pricing): void
     {
+        if ($this->waiting) {
+            Log::info("[Manager Core] RefreshMarketPricesJob: fetching the types left waiting for market '{$this->market}'");
+            $pricing->refreshWaiting($this->market);
+            return;
+        }
+
         if (empty($this->typeIds)) {
             return;
         }
@@ -103,7 +133,12 @@ class RefreshMarketPricesJob implements ShouldQueue
             return;
         }
 
-        $pricing->updatePrices($this->market, $this->typeIds);
+        if ($this->requestedBy !== null) {
+            $pricing->refreshRequested($this->market, $this->typeIds, $this->requestedBy);
+            return;
+        }
+
+        $pricing->updatePrices($this->market, $this->typeIds, null, PricingService::TRIGGER_SUBSCRIPTION);
     }
 
     /**

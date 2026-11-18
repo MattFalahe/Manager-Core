@@ -5,6 +5,7 @@ namespace ManagerCore\Console\Commands;
 use Illuminate\Console\Command;
 use ManagerCore\Models\PriceHistory;
 use ManagerCore\Services\AppraisalService;
+use ManagerCore\Services\PricingService;
 
 class CleanupOldPricesCommand extends Command
 {
@@ -20,15 +21,16 @@ class CleanupOldPricesCommand extends Command
      *
      * @var string
      */
-    protected $description = 'Cleanup old price history and expired appraisals';
+    protected $description = 'Cleanup old price history, expired appraisals and provider prices no plugin asks for';
 
     /**
      * Execute the console command.
      *
      * @param AppraisalService $appraisalService
+     * @param PricingService   $pricingService
      * @return int
      */
-    public function handle(AppraisalService $appraisalService)
+    public function handle(AppraisalService $appraisalService, PricingService $pricingService)
     {
         $this->info('[Manager Core] Starting cleanup...');
 
@@ -47,6 +49,14 @@ class CleanupOldPricesCommand extends Command
 
         if ($deletedAppraisals > 0) {
             $this->info("[Manager Core] Deleted {$deletedAppraisals} expired appraisals");
+        }
+
+        // A plugin that stops watching an item and starts again within the
+        // window gets its last price back at once.
+        $deletedVariants = $pricingService->pruneVariants((int) config('manager-core.pricing.variants.unsubscribed_retention_days', 7));
+
+        if ($deletedVariants > 0) {
+            $this->info("[Manager Core] Deleted {$deletedVariants} provider price(s) no plugin subscribes to any more");
         }
 
         $this->info('[Manager Core] Cleanup completed');

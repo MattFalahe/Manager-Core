@@ -44,7 +44,8 @@ class PluginPriceTest extends TestCase
 
         $figures = self::service()->figures($row);
 
-        $this->assertSame(['min', 'max', 'avg', 'median', 'percentile', 'stddev', 'volume', 'order_count', 'strategy', 'updated_at'], array_keys($figures));
+        $this->assertSame(['min', 'max', 'avg', 'median', 'percentile', 'stddev', 'volume', 'order_count', 'strategy', 'provider', 'updated_at'], array_keys($figures));
+        $this->assertSame('fuzzwork', $figures['provider']);
         $this->assertSame(0.01, $figures['min']);
         $this->assertSame(778.0, $figures['max']);
         $this->assertSame(778.0, $figures['percentile']);

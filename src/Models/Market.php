@@ -91,6 +91,22 @@ class Market extends Model
     public const STATUS_PROVIDER_DOWN = 'provider_down'; // upstream third-party unavailable
 
     /**
+     * The longest key a new market can have. A key is stored wherever a
+     * market is named, and the narrowest of those columns is a plugin's
+     * pricing preference, at 32. Prices, subscriptions and history hold 50.
+     */
+    public const KEY_MAX_LENGTH = 32;
+
+    /**
+     * A key made from a market's name, cut to what the columns hold. A cut
+     * that lands on a separator drops it, so the key never ends on one.
+     */
+    public static function fitKey(string $key): string
+    {
+        return rtrim(substr($key, 0, self::KEY_MAX_LENGTH), '-_');
+    }
+
+    /**
      * Is this a citadel market (a player-owned structure)?
      */
     public function isCitadel(): bool
@@ -139,6 +155,10 @@ class Market extends Model
      * Config markets provide the base hub set; DB markets can override the
      * same key or add brand-new ones. Citadel markets only live in the DB.
      *
+     * The five hubs are seeded as rows too, so a hub's row decides whether
+     * it is enabled: a disabled row takes the config default out with it.
+     * The default alone only stands while the table has no row for the hub.
+     *
      * @param bool $enabledOnly Only return enabled markets (default true)
      * @return array
      */
@@ -154,15 +174,17 @@ class Market extends Model
             $markets[$key]['market_type'] = self::TYPE_HUB;
             $markets[$key]['provider']    = 'fuzzwork';
             $markets[$key]['is_custom']   = false;
+            $markets[$key]['is_enabled']  = true;
         }
 
         // Merge in DB markets
         try {
-            $query = static::query();
-            if ($enabledOnly) {
-                $query->where('is_enabled', true);
-            }
-            foreach ($query->get() as $market) {
+            foreach (static::query()->get() as $market) {
+                if ($enabledOnly && !$market->is_enabled) {
+                    unset($markets[$market->key]);
+                    continue;
+                }
+
                 $markets[$market->key] = [
                     'name'                => $market->name,
                     'market_type'         => $market->market_type ?? self::TYPE_HUB,
@@ -174,6 +196,7 @@ class Market extends Model
                     'system_id'           => $market->system_id,
                     'structure_name'      => $market->structure_name,
                     'is_custom'           => $market->is_custom,
+                    'is_enabled'          => (bool) $market->is_enabled,
                     'last_refresh_at'     => $market->last_refresh_at,
                     'last_refresh_status' => $market->last_refresh_status,
                 ];

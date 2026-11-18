@@ -303,11 +303,7 @@ $(document).ready(function() {
                 ? 'native'
                 : 'jita_fallback';
         }
-        // Hub market.
-        if (supports === 'jita_amarr') {
-            return (marketKey === 'jita' || marketKey === 'amarr') ? 'native' : 'jita_fallback';
-        }
-        // 'hubs' or 'hubs_and_citadels' both support all 5 hubs natively.
+        // Hub market: every provider here prices all five hubs.
         return 'native';
     }
 

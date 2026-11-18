@@ -9,6 +9,7 @@ use Seat\Web\Http\Controllers\Controller;
 use ManagerCore\Models\Market;
 use ManagerCore\Models\PluginRegistry;
 use ManagerCore\Models\PricingPreference;
+use ManagerCore\Services\PricingService;
 
 /**
  * Admin UI for per-plugin pricing preferences.
@@ -57,6 +58,21 @@ class PricingPreferencesController extends Controller
         // Price-type options (kept on the model so this list is one-source-of-truth)
         $priceTypes = PricingPreference::PRICE_TYPES;
 
+        // Why each provider can't price each market, for the provider
+        // dropdown, and what each saved override comes to, for its row.
+        $pricing = app(PricingService::class);
+        $placeReasons = [];
+        try {
+            foreach ($pricing->listMarkets(false) as $key => $listed) {
+                foreach (PricingPreference::VALID_PROVIDER_OVERRIDES as $provider) {
+                    $placeReasons[$key][$provider] = $listed['providers'][$provider]['place_reason'] ?? null;
+                }
+            }
+            $overrides = collect($pricing->overrideHealth($preferences))->keyBy('plugin')->all();
+        } catch (\Throwable $e) {
+            $overrides = [];
+        }
+
         // Resolve display names from MC's compatible_plugins config — the
         // single source of truth for "this slug means this human name"
         // across the suite. The PluginRegistry table also exists but its
@@ -95,6 +111,8 @@ class PricingPreferencesController extends Controller
             'markets'       => $markets,
             'priceTypes'    => $priceTypes,
             'registryByKey' => $registryByKey,
+            'placeReasons'  => $placeReasons,
+            'overrides'     => $overrides,
         ]);
     }
 
@@ -109,7 +127,7 @@ class PricingPreferencesController extends Controller
         $pref = PricingPreference::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
-            'market'             => 'required|string|max:32',
+            'market'             => 'required|string|max:' . Market::KEY_MAX_LENGTH,
             'price_type'         => 'required|string|in:' . implode(',', PricingPreference::PRICE_TYPES),
             // Per-plugin provider override (Option B, 2026-05-29). Empty
             // string = no override (use market provider). Otherwise must
@@ -147,6 +165,20 @@ class PricingPreferencesController extends Controller
             $newProviderOverride = null;
         }
 
+        // Fuzzwork and Janice would answer for a place they don't price with
+        // Jita 4-4's prices, and the plugin would take them for the market's.
+        $pricing = app(PricingService::class);
+        if ($newProviderOverride !== null) {
+            $placeReason = $pricing->variantPlaceReason($newProviderOverride, $market);
+            if ($placeReason !== null) {
+                $label = PricingService::PROVIDER_LABELS[$newProviderOverride] ?? ucfirst($newProviderOverride);
+                $marketName = $effectiveMarkets[$market]['name'] ?? $market;
+
+                return redirect()->route('manager-core.pricing-preferences.index')
+                    ->with('error', "{$label} can't price {$marketName} for {$pref->plugin_key}, so nothing was saved. {$placeReason}");
+            }
+        }
+
         $pref->market            = $market;
         $pref->price_type        = $newPriceType;
         $pref->provider_override = $newProviderOverride;
@@ -166,6 +198,9 @@ class PricingPreferencesController extends Controller
         $changed = $oldMarket !== $market
             || $oldPriceType !== $newPriceType
             || $oldProviderOverride !== $newProviderOverride;
+
+        $this->followPreferenceChange($pricing, $pref->plugin_key, $oldMarket, $oldProviderOverride, $market, $newProviderOverride);
+
         if ($changed) {
             \ManagerCore\Topics::publish('pricing.preference_changed', [
                 'plugin_key'           => $pref->plugin_key,
@@ -209,6 +244,8 @@ class PricingPreferencesController extends Controller
 
         Log::info("[Manager Core] Admin reset pricing preference for '{$pref->plugin_key}' to track plugin default (cleared provider_override)");
 
+        $this->followPreferenceChange(app(PricingService::class), $pref->plugin_key, $oldMarket, $oldProviderOverride, $pref->market, null);
+
         // No-op gating: only publish when the reset actually changed
         // something subscribers care about. Audit 2026-05-29 finding M5:
         // unconditional publish on reset was flushing every subscriber's
@@ -231,6 +268,23 @@ class PricingPreferencesController extends Controller
 
         return redirect()->route('manager-core.pricing-preferences.index')
             ->with('success', "Reset {$pref->plugin_key}. Will refresh to plugin default on next boot.");
+    }
+
+    /**
+     * Keep the prices an override reads in step with the preference. The
+     * preference is saved either way: what the plugin reads is fetched on
+     * its next read if this fails.
+     */
+    private function followPreferenceChange(PricingService $pricing, string $pluginKey, ?string $oldMarket, ?string $oldProvider, string $newMarket, ?string $newProvider): void
+    {
+        try {
+            $moved = $pricing->followPreferenceChange($pluginKey, $oldMarket, $oldProvider, $newMarket, $newProvider);
+            if ($moved['dropped'] > 0 || $moved['subscribed'] > 0) {
+                Log::info("[Manager Core] '{$pluginKey}' pricing preference: dropped {$moved['dropped']} kept price subscription(s), subscribed {$moved['subscribed']}");
+            }
+        } catch (\Throwable $e) {
+            Log::warning("[Manager Core] Could not move the prices kept for '{$pluginKey}' to its new preference: " . $e->getMessage());
+        }
     }
 
     /**

@@ -22,6 +22,24 @@ use ManagerCore\Services\PriceProviders\JanicePriceProvider;
  */
 class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
 {
+    use PriceVariants;
+
+    /** The topic a fetch of provider variants is announced on. */
+    public const VARIANTS_REFRESHED_TOPIC = 'pricing.variants_refreshed';
+
+    /**
+     * How long a variant's first fetch is not queued again, for a plugin
+     * that subscribes on every request.
+     */
+    public const VARIANT_FIRST_FETCH_SECONDS = 900;
+
+    /**
+     * How old a price kept for a plugin's provider override may be before a
+     * read asks the provider again. Twice the 4-hourly refresh, so only a
+     * stalled refresh leaves one this old.
+     */
+    public const OVERRIDE_STALE_SECONDS = 28800;
+
     /**
      * The setting naming the provider that stands in for a hub market's own
      * when it fails, and its value for no stand-in at all.
@@ -42,6 +60,16 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         'seat' => 'SeAT Price Provider',
     ];
 
+    /** The provider behind each strategy a price is stored with. */
+    public const STRATEGY_PROVIDERS = [
+        'fuzzwork' => 'fuzzwork',
+        'janice' => 'janice',
+        'goonpraisal' => 'goonpraisal',
+        'orders' => 'esi',
+        'esi' => 'esi',
+        'seat-price-provider' => 'seat',
+    ];
+
     /**
      * How many of the asked types that already have a price an empty answer
      * has to cover before it counts as the provider failing, rather than a
@@ -49,8 +77,37 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
      */
     public const PROVIDER_DOWN_MIN_TYPES = 5;
 
+    /** What set a refresh off, as pricing.market_refreshed reports it. */
+    public const TRIGGER_SCHEDULE = 'schedule';
+    public const TRIGGER_SUBSCRIPTION = 'subscription';
+    public const TRIGGER_RETRY = 'retry';
+    public const TRIGGER_MANUAL = 'manual';
+    public const TRIGGER_REQUEST = 'request';
+
     /** How long types a refresh failed to fetch wait for their one more try. */
     public const RETRY_DELAY_MINUTES = 10;
+
+    /**
+     * The setting that holds when a scheduled refresh last stored a price.
+     * The newest price in the table can't say that once a plugin may ask for
+     * prices between the scheduled runs.
+     */
+    public const LAST_SCHEDULED_SETTING = 'pricing.last_scheduled_refresh_at';
+
+    /**
+     * How long a market counts as being refreshed if the refresh never says
+     * it is done. Past the longest refresh, so only a killed one gets here.
+     */
+    private const REFRESHING_KEPT_SECONDS = 900;
+
+    /**
+     * How much younger than asked a price may be and still be fetched again.
+     * A fetch lands a few seconds after the ask that queued it, so a plugin
+     * asking on a fixed cadence would find its last fetch just short of the
+     * age at the next round, and wait one round more every time: asked for
+     * hourly every 15 minutes, prices came 75 minutes apart.
+     */
+    public const REQUEST_TOLERANCE_SECONDS = 300;
 
     /**
      * Get current price for one or more items.
@@ -103,11 +160,7 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         );
 
         return Cache::remember($cacheKey, $cacheTtlSeconds, function () use ($typeIds, $market, $priceType) {
-            $prices = [];
-
-            foreach ($typeIds as $typeId) {
-                $prices[$typeId] = $this->fetchPriceForType($typeId, $market, $priceType);
-            }
+            $prices = $this->fetchPricesForTypes($typeIds, $market, $priceType);
 
             return count($prices) === 1 ? reset($prices) : $prices;
         });
@@ -133,22 +186,15 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
             return [];
         }
 
-        // Per-plugin provider override path (Option B). When the caller
-        // passes a plugin key AND that plugin has a non-null
-        // provider_override on its pref row, do a LIVE batch fetch via
-        // the override provider instead of reading MC's local cache.
-        // The cache can't store per-provider variants for the same market
-        // (no provider column on manager_core_market_prices), so an
-        // override-using plugin needs a cache-bypass path. Consumer
-        // plugins typically have their own local cache that absorbs the
-        // per-read upstream cost.
+        // A plugin whose preference names a provider gets that provider's
+        // prices, kept for it apart from the market's own (see
+        // overridePrices). Without one, the market's own.
         if ($pluginKeyForOverride !== null) {
             $pref = \ManagerCore\Models\PricingPreference::forPlugin($pluginKeyForOverride);
             $override = $pref?->provider_override;
             if ($override !== null && $override !== '') {
-                return $this->fetchLivePricesViaOverride($override, $market, $typeIds, $priceType);
+                return $this->overridePrices($pluginKeyForOverride, $override, (string) $market, $typeIds, $priceType);
             }
-            // No override → fall through to the cached path below
         }
 
         $version = $this->priceCacheVersion($market);
@@ -163,11 +209,7 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         );
 
         return Cache::remember($cacheKey, $cacheTtlSeconds, function () use ($typeIds, $market, $priceType) {
-            $prices = [];
-
-            foreach ($typeIds as $typeId) {
-                $prices[$typeId] = $this->fetchPriceForType($typeId, $market, $priceType);
-            }
+            $prices = $this->fetchPricesForTypes($typeIds, $market, $priceType);
 
             // No collapse — always [typeId => stats] regardless of count.
             return $prices;
@@ -205,16 +247,10 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         $needBoth   = $priceType === 'avg';
         $fetchSide  = $needBoth ? 'both' : $priceType;
 
-        // Per-plugin provider override (Option B): if pref carries an
-        // override, live-fetch via that provider. Bypasses MC's local
-        // cache because the cache is keyed (type_id, market, price_type)
-        // with no provider column, so cached Janice-Jita and Fuzzwork-Jita
-        // would clash for the same market. The override is the plugin's
-        // own choice; if MM wants Janice, MM pays the per-read Janice cost
-        // (which is fine because MM has its own local cache that absorbs
-        // the cadence).
+        // An override is read from the prices kept for the plugin through
+        // that provider (see overridePrices).
         if ($providerOverride !== null && $providerOverride !== '') {
-            $rawStats = $this->fetchLivePriceViaOverride($providerOverride, $market, $typeId, $fetchSide);
+            $rawStats = $this->overridePrices($pluginKey, $providerOverride, $market, [$typeId], $fetchSide)[$typeId] ?? null;
         } else {
             $rawStats = $this->fetchPriceForType($typeId, $market, $fetchSide);
         }
@@ -249,12 +285,10 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         $needBoth         = $priceType === 'avg';
         $fetchSide        = $needBoth ? 'both' : $priceType;
 
-        // Override path: one batch live-fetch to the override provider
-        // (provider's getPrices is batch-aware so this is one upstream
-        // call for all types, not N calls). See priceForPlugin for the
-        // cache-bypass rationale.
+        // An override is read from the prices kept for the plugin through
+        // that provider (see overridePrices).
         if ($providerOverride !== null && $providerOverride !== '') {
-            $rawByType = $this->fetchLivePricesViaOverride($providerOverride, $market, $typeIds, $fetchSide);
+            $rawByType = $this->overridePrices($pluginKey, $providerOverride, $market, $typeIds, $fetchSide);
             $out = [];
             foreach ($typeIds as $typeId) {
                 $stats = $rawByType[(int) $typeId] ?? null;
@@ -266,9 +300,10 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         }
 
         // No override: read from MC's local cache (current behaviour).
+        $stored = $this->fetchPricesForTypes(array_map('intval', $typeIds), $market, $fetchSide);
         $out = [];
         foreach ($typeIds as $typeId) {
-            $stats = $this->fetchPriceForType((int) $typeId, $market, $fetchSide);
+            $stats = $stored[(int) $typeId] ?? null;
             $out[(int) $typeId] = $stats === null
                 ? null
                 : $this->reduceStatsToFloat($stats, $priceType);
@@ -325,27 +360,51 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
      */
     protected function fetchPriceForType($typeId, $market, $priceType)
     {
-        $result = [];
+        return $this->fetchPricesForTypes([$typeId], $market, $priceType)[$typeId] ?? null;
+    }
 
-        if ($priceType === 'both' || $priceType === 'buy') {
-            $buyPrice = MarketPrice::where('type_id', $typeId)
-                ->where('market', $market)
-                ->where('price_type', 'buy')
-                ->first();
+    /**
+     * Each type's stored price at a market, in fetchPriceForType's shape,
+     * keyed by type id in the order asked. One query per thousand types
+     * rather than one per type and side: Mining Manager asks for about 500
+     * at once.
+     *
+     * @return array<int, array|null>
+     */
+    protected function fetchPricesForTypes(array $typeIds, $market, $priceType): array
+    {
+        $sides = array_values(array_intersect(['buy', 'sell'], $priceType === 'both' ? ['buy', 'sell'] : [$priceType]));
 
-            $result['buy'] = $buyPrice ? $this->formatPriceStats($buyPrice) : null;
+        $rows = [];
+        if (!empty($sides) && !empty($typeIds)) {
+            foreach ($this->storedPriceRows(array_values(array_unique(array_map('intval', $typeIds))), (string) $market, $sides) as $row) {
+                $rows[(int) $row->type_id][$row->price_type] = $row;
+            }
         }
 
-        if ($priceType === 'both' || $priceType === 'sell') {
-            $sellPrice = MarketPrice::where('type_id', $typeId)
-                ->where('market', $market)
-                ->where('price_type', 'sell')
-                ->first();
+        $prices = [];
+        foreach ($typeIds as $typeId) {
+            $result = [];
+            foreach ($sides as $side) {
+                $row = $rows[(int) $typeId][$side] ?? null;
+                $result[$side] = $row ? $this->formatPriceStats($row) : null;
+            }
 
-            $result['sell'] = $sellPrice ? $this->formatPriceStats($sellPrice) : null;
+            $prices[$typeId] = $priceType === 'both' ? $result : ($result[$priceType] ?? null);
         }
 
-        return $priceType === 'both' ? $result : ($result[$priceType] ?? null);
+        return $prices;
+    }
+
+    /** The stored rows for these types and sides at a market. */
+    protected function storedPriceRows(array $typeIds, string $market, array $sides): iterable
+    {
+        foreach (array_chunk($typeIds, 1000) as $chunk) {
+            yield from MarketPrice::where('market', $market)
+                ->whereIn('type_id', $chunk)
+                ->whereIn('price_type', $sides)
+                ->get();
+        }
     }
 
     /**
@@ -366,51 +425,33 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
             'volume' => $price->volume,
             'order_count' => $price->order_count,
             'strategy' => $price->strategy,
+            'provider' => self::providerOfStrategy($price->strategy),
             'updated_at' => $price->updated_at,
         ];
     }
 
     /**
-     * Per-plugin provider override — live fetch for a single type.
-     *
-     * Called from priceForPlugin when the pref carries a non-null
-     * provider_override. Skips MC's local cache (because the cache
-     * can't store per-provider variants for the same market) and
-     * calls the override provider directly.
-     *
-     * Returns the same shape as fetchPriceForType: either ['buy' => stats,
-     * 'sell' => stats] (when $priceType='both') or just the single-side
-     * inner stats array.
-     *
-     * @return array|null
+     * The provider that wrote a price, from the strategy stored with it, or
+     * null for a strategy no provider here writes. A plugin reads this
+     * rather than keeping its own list of strategy names.
      */
-    protected function fetchLivePriceViaOverride(string $providerKey, string $market, int $typeId, string $priceType)
+    public static function providerOfStrategy(?string $strategy): ?string
     {
-        $byType = $this->fetchLivePricesViaOverride($providerKey, $market, [$typeId], $priceType);
-        return $byType[$typeId] ?? null;
+        return self::STRATEGY_PROVIDERS[strtolower(trim((string) $strategy))] ?? null;
     }
 
     /**
-     * Per-plugin provider override — live batch fetch for many types.
-     *
-     * Called from pricesForPlugin. Routes through the override provider's
-     * getPrices() method (one batch upstream call regardless of $typeIds
-     * length, per the PriceProviderInterface contract). Returns
-     * `[typeId => stats]` where stats matches the fetchPriceForType shape
-     * (either both-sides ['buy' => ..., 'sell' => ...] or single-side
-     * inner stats, depending on $priceType).
+     * An override provider's prices asked for now and kept nowhere: for a
+     * market Manager Core has no row for, and while the variant tables can't
+     * be read. Every other override read goes through overridePrices.
      *
      * A provider that fails gets the market's fallback provider, as a
      * refresh does (see fetchWithFallback), and whatever neither could fetch
-     * keeps the last price MC has cached for the market. Either stand-in
-     * comes back as the price alone (see priceOnly). A type the provider
-     * answered with no price stays null: that is what it says the item is
-     * worth, and reduceStatsToFloat returns null for it.
+     * keeps the last price MC has cached for the market (see standInsFor). A
+     * type the provider answered with no price stays null: that is what it
+     * says the item is worth, and reduceStatsToFloat returns null for it.
      *
-     * @param string $providerKey 'esi' | 'janice' | 'fuzzwork' | 'goonpraisal' | 'seat'
-     * @param string $market      Market key, e.g. 'jita'
-     * @param array  $typeIds     Type IDs to fetch
-     * @param string $priceType   'both' | 'buy' | 'sell'
+     * @param string $priceType 'both' | 'buy' | 'sell'
      * @return array<int, array|null>
      */
     protected function fetchLivePricesViaOverride(string $providerKey, string $market, array $typeIds, string $priceType): array
@@ -421,43 +462,72 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
 
         $typeIds = array_values(array_unique(array_map('intval', $typeIds)));
 
-        // $persist=false so the provider builds + returns the in-memory map
-        // WITHOUT writing to manager_core_market_prices. The override path
-        // bypasses MC's local cache by design — if we persisted here,
-        // MM-via-Janice writes would clobber the cron's Fuzzwork-Jita data
-        // and SM (no override) would then read Janice prices on the next
-        // cache hit. Caveat: MCPraisal (ESI) provider can't honour
-        // $persist=false (MarketDataService is the whole architecture
-        // there) and logs a warning — see ESIPriceProvider docblock.
+        // Not stored: the market's rows are its own provider's. MCPraisal
+        // works a hub out without storing it too; a structure it reads only
+        // for a market of its own (see ESIPriceProvider).
         $outcome = $this->fetchWithFallback($providerKey, $market, $typeIds, false);
-        $raw = $outcome['prices'];
-
-        foreach ($outcome['stood_in'] as $typeId) {
-            $raw[$typeId] = $this->priceOnly($raw[$typeId] ?? null);
-        }
-
-        foreach ($outcome['unanswered'] as $typeId) {
-            $raw[$typeId] = $this->priceOnly($this->fetchPriceForType($typeId, $market, 'both'));
-        }
+        $raw = $this->standInsFor($outcome, $market) + $outcome['prices'];
 
         $out = [];
-        foreach ($typeIds as $tid) {
-            $perType = is_array($raw[$tid] ?? null) ? $raw[$tid] : null;
+        foreach ($typeIds as $typeId) {
+            $out[$typeId] = self::sideOf(self::withProviders(is_array($raw[$typeId] ?? null) ? $raw[$typeId] : null), $priceType);
+        }
 
-            if ($perType === null) {
-                $out[$tid] = null;
-                continue;
-            }
+        return $out;
+    }
 
-            if ($priceType === 'both') {
-                $out[$tid] = $perType;
-            } else {
-                // Single-side requested: hand back just that side's
-                // inner stats, matching fetchPriceForType's shape.
-                $out[$tid] = is_array($perType[$priceType] ?? null) ? $perType[$priceType] : null;
+    /**
+     * What stands in for the types a live read's provider didn't price: the
+     * fallback's price where it stood in, and the market's last cached price
+     * where nothing did, each as the price alone (see priceOnly).
+     *
+     * @return array<int, ?array>
+     */
+    protected function standInsFor(array $outcome, string $market): array
+    {
+        $standIns = [];
+        foreach ($outcome['stood_in'] as $typeId) {
+            $standIns[(int) $typeId] = $this->priceOnly($outcome['prices'][$typeId] ?? null);
+        }
+
+        $cached = $this->fetchPricesForTypes($outcome['unanswered'], $market, 'both');
+        foreach ($outcome['unanswered'] as $typeId) {
+            $standIns[(int) $typeId] = $this->priceOnly($cached[$typeId] ?? null);
+        }
+
+        return $standIns;
+    }
+
+    /** Each side of a live answer names the provider that wrote it, as a stored one does. */
+    protected static function withProviders(?array $perType): ?array
+    {
+        if ($perType === null) {
+            return null;
+        }
+
+        foreach (['buy', 'sell'] as $side) {
+            if (is_array($perType[$side] ?? null) && !array_key_exists('provider', $perType[$side])) {
+                $perType[$side]['provider'] = self::providerOfStrategy($perType[$side]['strategy'] ?? null);
             }
         }
-        return $out;
+
+        return $perType;
+    }
+
+    /** Both sides, or the one side asked for, as fetchPricesForTypes gives them. */
+    protected static function sideOf(?array $perType, string $priceType): ?array
+    {
+        if ($priceType === 'both') {
+            return $perType;
+        }
+
+        return is_array($perType[$priceType] ?? null) ? $perType[$priceType] : null;
+    }
+
+    /** Whether a provider gave this side a price. */
+    protected static function sidePriced(?array $side): bool
+    {
+        return $side !== null && ((float) ($side['min'] ?? 0) > 0 || (float) ($side['max'] ?? 0) > 0);
     }
 
     /**
@@ -498,7 +568,7 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
      * so a refresh can try them again later; they keep their cached price
      * meanwhile, as does everything a provider and its fallback both miss.
      *
-     * @return array{prices: array, asked: int, failed: int[], unanswered: int[], stood_in: int[], provider: string,
+     * @return array{prices: array, asked: int, failed: int[], unanswered: int[], stood_in: int[], priced: int[], provider: string,
      *               error: ?string, retryable: bool, status: ?string, outright: bool, fallback: ?array}
      */
     protected function fetchWithFallback(string $providerKey, string $market, array $typeIds, bool $persist): array
@@ -528,7 +598,8 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         // An empty answer only counts against a third-party service, which
         // can answer with nothing while it is in trouble. MCPraisal reads
         // CCP's own order book, so an empty answer from it is the market.
-        $outright = empty($this->pricedTypeIds($prices, $failed, $freshIds))
+        $priced = $this->pricedTypeIds($prices, $failed, $freshIds);
+        $outright = empty($priced)
             && (!empty($failed) || ($freshIds === null && $this->countCached($market, $typeIds) >= self::PROVIDER_DOWN_MIN_TYPES));
 
         $outcome = [
@@ -537,6 +608,7 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
             'failed' => $failed,
             'unanswered' => $failed,
             'stood_in' => [],
+            'priced' => $priced,
             'provider' => $label,
             'error' => $failures['error'] ?? null,
             'retryable' => (bool) ($failures['retryable'] ?? true),
@@ -569,6 +641,7 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
             $outcome['failed'] = array_values(array_diff($failed, array_keys($fresh)));
             $outcome['unanswered'] = array_values(array_diff($typeIds, array_keys($fresh)));
             $outcome['stood_in'] = array_keys($fresh);
+            $outcome['priced'] = array_map('intval', array_keys($fresh));
             $outcome['fallback'] = $fallback + ['priced' => count($fresh), 'error' => $fallbackError];
 
             Log::warning("[Manager Core] {$label} failed for '{$market}' ({$outcome['error']}); {$fallback['label']} priced " . count($fresh) . ' of ' . count($typeIds) . ' type(s) instead'
@@ -613,6 +686,94 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         }
 
         return [$fresh, empty($fresh) ? ($failures['error'] ?? 'it had no prices for them either') : null];
+    }
+
+    /**
+     * Every market, with what a plugin needs to offer it to its users: the
+     * provider that prices it, whether it is enabled, how its last refresh
+     * went, whether that provider prices the market's own place, and what
+     * every provider could do there for a plugin that names one (see
+     * PriceVariants::providersAt).
+     *
+     * @return array<string, array{key: string, name: string, market_type: string, provider: string, provider_label: string,
+     *               is_enabled: bool, last_refresh_at: ?string, last_refresh_status: ?string, prices_own_place: bool, place_reason: ?string,
+     *               providers: array<string, array{label: string, own: bool, available: bool, prices_place: bool, place_reason: ?string}>}>
+     */
+    public function listMarkets(bool $enabledOnly = true): array
+    {
+        $markets = [];
+        $available = [];
+
+        foreach ($this->effectiveMarkets($enabledOnly) as $key => $row) {
+            $key = (string) $key;
+            $provider = (string) ($row['provider'] ?? 'fuzzwork');
+            $reason = $this->placeReason($provider, $key, $row['provider_slug'] ?? null);
+            $refreshedAt = $row['last_refresh_at'] ?? null;
+
+            $markets[$key] = [
+                'key' => $key,
+                'name' => (string) ($row['name'] ?? $key),
+                'market_type' => (string) ($row['market_type'] ?? Market::TYPE_HUB),
+                'provider' => $provider,
+                'provider_label' => self::PROVIDER_LABELS[$provider] ?? ucfirst($provider),
+                'is_enabled' => (bool) ($row['is_enabled'] ?? true),
+                'last_refresh_at' => $refreshedAt instanceof \DateTimeInterface
+                    ? $refreshedAt->format(\DateTimeInterface::ATOM)
+                    : ($refreshedAt !== null ? (string) $refreshedAt : null),
+                'last_refresh_status' => isset($row['last_refresh_status']) ? (string) $row['last_refresh_status'] : null,
+                'prices_own_place' => $reason === null,
+                'place_reason' => $reason,
+                'providers' => $this->providersAt($key, ['provider' => $provider] + $row, $available),
+            ];
+        }
+
+        return $markets;
+    }
+
+    /** The markets as the Markets page has them, config hubs included. */
+    protected function effectiveMarkets(bool $enabledOnly): array
+    {
+        return Market::getEffectiveMarkets($enabledOnly);
+    }
+
+    /**
+     * Why a provider does not price a market at the market's own place, or
+     * null when it does. Fuzzwork and Janice price anything they don't know
+     * at Jita 4-4 and say nothing, so a plugin showing those prices under
+     * the market's name would be showing Jita's. The Markets form refuses a
+     * new market of that kind on the same rule (MarketsController::placeError).
+     */
+    public function placeReason(string $provider, string $marketKey, ?string $slug = null): ?string
+    {
+        $slug = trim((string) $slug);
+
+        switch ($provider) {
+            case 'esi':
+                return null;
+
+            case 'fuzzwork':
+                return FuzzworkPriceProvider::tracksMarket($marketKey)
+                    ? null
+                    : 'Fuzzwork prices only the five trade hubs, so it prices this market at Jita 4-4.';
+
+            case 'janice':
+                return JanicePriceProvider::tracksMarket($slug) || JanicePriceProvider::tracksMarket($marketKey)
+                    ? null
+                    : 'Janice prices only the five trade hubs and this market names none of them, so it is priced at Jita 4-4.';
+
+            case 'goonpraisal':
+                // A market routed through Goonpraisal with a slug is asked
+                // for by that slug. Only one without is looked up.
+                return $slug !== '' || GoonpraisalPriceProvider::marketSlug($marketKey) !== null
+                    ? null
+                    : 'Goonpraisal has no market by this name.';
+
+            case 'seat':
+                return 'A SeAT price provider gives one price for every place, not this market\'s own.';
+
+            default:
+                return "Manager Core has no provider called '{$provider}'.";
+        }
     }
 
     /**
@@ -948,73 +1109,175 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
 
         Log::info("[Manager Core] Plugin '{$pluginName}' registered " . count($typeIds) . " type IDs for market '{$market}'");
 
-        // Determine which types need an immediate price fetch
-        // Types that had no prior subscription OR have no cached price yet
+        // A first fetch for what has none yet: types nobody had subscribed
+        // at this market, and subscribed ones still without a stored price.
         if ($immediateRefresh) {
-            $newTypeIds = array_diff($typeIds, $existingTypeIds);
+            $toFetch = array_values(array_unique(array_merge(
+                array_map('intval', array_diff($typeIds, $existingTypeIds)),
+                $this->typeIdsWithoutPrice((string) $market, $typeIds)
+            )));
 
-            // Also check for types that exist in subscriptions but have no price data
-            if (empty($newTypeIds)) {
-                $pricedTypeIds = MarketPrice::where('market', $market)
-                    ->whereIn('type_id', $typeIds)
-                    ->pluck('type_id')
-                    ->toArray();
-
-                $missingPriceIds = array_diff($typeIds, $pricedTypeIds);
-
-                if (!empty($missingPriceIds)) {
-                    $newTypeIds = $missingPriceIds;
-                }
-            }
-
-            if (!empty($newTypeIds)) {
-                // Queue the refresh rather than running it synchronously.
-                //
-                // Pre-fix this called $this->updatePrices(...) inline, which
-                // for plugins subscribing 200+ types (e.g. Mining Manager's
-                // moon ores + ice + fuel + gas) meant N synchronous ESI HTTP
-                // calls during the original caller's request. Plugin authors
-                // typically invoke registerTypes from a settings-save HTTP
-                // handler — the synchronous fetch could exceed PHP's
-                // max_execution_time and certainly the user's patience.
-                //
-                // RefreshMarketPricesJob runs the same updatePrices() path
-                // on the queue worker, so the registerTypes call returns
-                // promptly and prices populate within seconds (default Redis
-                // queue) on the worker side. If the queue is unavailable
-                // (config issue, broken worker), the scheduled
-                // `manager-core:update-prices` cron picks up the new types
-                // on its next 4-hourly tick — operators are not blocked.
-                //
-                // Defense-in-depth debounce — Cache::add returns true only
-                // when the key didn't exist. If a misbehaving plugin calls
-                // registerTypes(immediateRefresh=true) from its boot path
-                // (which runs on every HTTP request), this gate ensures we
-                // dispatch AT MOST one job per market per DEBOUNCE_WINDOW.
-                // Without it we saw 1-2 RefreshMarketPricesJob per second
-                // in Horizon when a plugin had per-request subscribe calls
-                // and the citadel market was intermittently failing —
-                // every request found prices "missing" and queued another
-                // refresh. See SM commit history around 2026-05-18.
-                $debounceKey = self::dispatchDebounceKey($market);
-                $first = Cache::add($debounceKey, now()->toIso8601String(), self::DEBOUNCE_WINDOW_SECONDS);
-                if (!$first) {
-                    Log::debug("[Manager Core] Skipping RefreshMarketPricesJob dispatch for '{$market}': debounce window ({$market} dispatched in last " . self::DEBOUNCE_WINDOW_SECONDS . "s)");
-                } else {
-                    Log::info("[Manager Core] Dispatching RefreshMarketPricesJob for " . count($newTypeIds) . " new/missing types in '{$market}'");
-                    RefreshMarketPricesJob::dispatch($market, array_values($newTypeIds));
-                }
+            if (!empty($toFetch)) {
+                $this->queueFirstFetch((string) $market, $toFetch);
             }
         }
     }
 
     /**
-     * Debounce window for the dispatch gate above. 30 seconds is long
-     * enough to swallow per-request storms and short enough that an
-     * admin-triggered "refresh now" still feels responsive (worst case
-     * they wait 30s to retry).
+     * Queue the first fetch for these types on the worker, so a plugin
+     * subscribing hundreds of types from a settings save doesn't wait on the
+     * provider. If the queue is down, the scheduled refresh picks them up.
+     *
+     * One job per market per window. A plugin that subscribes from its boot
+     * path does so on every request, and with a market that kept failing
+     * that queued a job or two a second. A call inside the window is not
+     * lost, though: its types wait in the cache, and one more job at the end
+     * of the window fetches the types that were asked for inside it. Only
+     * those: nothing is fetched that a plugin did not send.
+     */
+    protected function queueFirstFetch(string $market, array $typeIds): void
+    {
+        if (Cache::add(self::dispatchDebounceKey($market), now()->toIso8601String(), self::DEBOUNCE_WINDOW_SECONDS)) {
+            Log::info("[Manager Core] Dispatching RefreshMarketPricesJob for " . count($typeIds) . " new/missing types in '{$market}'");
+            $this->dispatchRefresh($market, $typeIds);
+
+            return;
+        }
+
+        if (!$this->keepWaiting($market, $typeIds)) {
+            Log::warning("[Manager Core] Could not keep " . count($typeIds) . " type(s) waiting for '{$market}', so they are fetched now");
+            $this->dispatchRefresh($market, $typeIds);
+
+            return;
+        }
+
+        // The job forgets this key as it starts, so the key outlives the
+        // wait only when the job is lost, and then not for long.
+        if (Cache::add(self::catchUpKey($market), now()->toIso8601String(), self::DEBOUNCE_WINDOW_SECONDS * 2)) {
+            Log::info("[Manager Core] '{$market}' had a fetch queued in the last " . self::DEBOUNCE_WINDOW_SECONDS
+                . "s, so the types asked for since are fetched in " . self::DEBOUNCE_WINDOW_SECONDS . 's');
+            $this->dispatchRefresh($market, [], true, self::DEBOUNCE_WINDOW_SECONDS);
+        }
+    }
+
+    /**
+     * The fetch queued for the end of a debounce window: the types plugins
+     * asked for inside it.
+     */
+    public function refreshWaiting(string $market): void
+    {
+        // Forgotten before the types are taken, so a subscribe that lands
+        // after that queues a fetch of its own rather than counting on this one.
+        Cache::forget(self::catchUpKey($market));
+
+        $typeIds = $this->takeWaiting($market);
+        if (empty($typeIds)) {
+            return;
+        }
+
+        $this->refreshMarket($market, $typeIds, null, true, self::TRIGGER_SUBSCRIPTION);
+    }
+
+    /**
+     * Add types to the ones waiting for the market's window to end. False
+     * when they could not be kept, and the caller fetches them itself.
+     */
+    protected function keepWaiting(string $market, array $typeIds): bool
+    {
+        $key = self::waitingKey($market);
+        $typeIds = array_values(array_unique(array_map('intval', $typeIds)));
+
+        try {
+            // A plugin asking for the same types on every request finds them
+            // waiting already, and takes no lock to find that out.
+            if (empty(array_diff($typeIds, (array) Cache::get($key, [])))) {
+                return true;
+            }
+
+            $this->withWaitingLock($market, function () use ($key, $typeIds) {
+                $waiting = array_values(array_unique(array_merge((array) Cache::get($key, []), $typeIds)));
+                Cache::put($key, $waiting, self::WAITING_KEPT_SECONDS);
+            });
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::warning("[Manager Core] Keeping types waiting for '{$market}' failed: " . $e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * The types waiting at a market, which stop waiting. If the lock can't
+     * be had this throws, and the job that asked is tried again.
+     *
+     * @return int[]
+     */
+    protected function takeWaiting(string $market): array
+    {
+        $key = self::waitingKey($market);
+        $taken = [];
+
+        $this->withWaitingLock($market, function () use ($key, &$taken) {
+            $taken = (array) Cache::get($key, []);
+            Cache::forget($key);
+        });
+
+        return array_values(array_unique(array_map('intval', $taken)));
+    }
+
+    /**
+     * Run $do while nothing else reads or writes the market's waiting
+     * types: the list is read, changed and written back, and two plugins
+     * subscribing at once would each write it without the other's types.
+     */
+    protected function withWaitingLock(string $market, callable $do): void
+    {
+        Cache::lock(self::waitingKey($market) . '.lock', 10)->block(3, $do);
+    }
+
+    /** Queue a refresh job, now or after a wait. */
+    protected function dispatchRefresh(string $market, array $typeIds, bool $waiting = false, int $delaySeconds = 0): void
+    {
+        $pending = RefreshMarketPricesJob::dispatch($market, array_values($typeIds), false, $waiting);
+
+        if ($delaySeconds > 0) {
+            $pending->delay(now()->addSeconds($delaySeconds));
+        }
+    }
+
+    /**
+     * Which of these types have no stored price at the market, on either side.
+     *
+     * @return int[]
+     */
+    protected function typeIdsWithoutPrice(string $market, array $typeIds): array
+    {
+        $typeIds = array_values(array_unique(array_map('intval', $typeIds)));
+
+        $priced = [];
+        foreach (array_chunk($typeIds, 1000) as $chunk) {
+            $rows = MarketPrice::where('market', $market)->whereIn('type_id', $chunk)->distinct()->pluck('type_id');
+            foreach ($rows as $typeId) {
+                $priced[(int) $typeId] = true;
+            }
+        }
+
+        return array_values(array_filter($typeIds, fn ($typeId) => !isset($priced[$typeId])));
+    }
+
+    /**
+     * How long a market waits between first fetches. 30 seconds is long
+     * enough to swallow per-request storms and short enough that prices for
+     * a newly subscribed type still arrive promptly.
      */
     public const DEBOUNCE_WINDOW_SECONDS = 30;
+
+    /**
+     * How long waiting types are kept. Well past the window, so that if the
+     * job due to take them is lost, the next one still finds them.
+     */
+    private const WAITING_KEPT_SECONDS = 3600;
 
     /**
      * Cache key for the debounce gate. Per-market so a hub-market
@@ -1025,9 +1288,231 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         return 'mc.pricing.refresh_dispatch.' . $market;
     }
 
+    /** Cache key that marks a market as having its end-of-window fetch queued. */
+    private static function catchUpKey(string $market): string
+    {
+        return 'mc.pricing.refresh_window_end.' . $market;
+    }
+
+    /** Cache key for the types asked for inside a market's window. */
+    private static function waitingKey(string $market): string
+    {
+        return 'mc.pricing.refresh_waiting.' . $market;
+    }
+
     /**
-     * Unregister all type subscriptions owned by a given plugin, optionally
-     * scoped to a single market.
+     * Fetch again, between the scheduled refreshes, the types a plugin names
+     * whose stored price at the market is older than the plugin can use.
+     *
+     * For a plugin whose users watch a price move. The scheduled refresh
+     * stays as it is for everyone else: only a plugin listed under
+     * pricing.refresh_on_request.plugins may ask, only for types it is
+     * subscribed to at the market, and no type is fetched more often than
+     * the market's provider allows, however often it is asked for. The
+     * fetch runs on the worker and is announced to the asking plugin alone.
+     *
+     * The common ask finds nothing old enough, and costs two reads.
+     *
+     * With a provider named, the ask is for the plugin's variants through
+     * that provider (see PriceVariants), on the same rules.
+     *
+     * @param int[] $typeIds
+     * @return array{queued: int, fresh: int, reason: ?string} queued: types
+     *         now being fetched; fresh: types young enough already; reason:
+     *         why nothing can be fetched for this plugin (not_allowed,
+     *         unknown_market, unknown_provider, not_subscribed), or null
+     */
+    public function refreshIfOlder(string $pluginName, array $typeIds, string $market, int $maxAgeSeconds, ?string $provider = null): array
+    {
+        $answer = fn (int $queued, int $fresh, ?string $reason = null) => ['queued' => $queued, 'fresh' => $fresh, 'reason' => $reason];
+
+        if (!in_array($pluginName, (array) config('manager-core.pricing.refresh_on_request.plugins', []), true)) {
+            return $answer(0, 0, 'not_allowed');
+        }
+
+        $typeIds = array_values(array_unique(array_map('intval', $typeIds)));
+        if (empty($typeIds)) {
+            return $answer(0, 0);
+        }
+
+        if (!isset($this->effectiveMarkets(true)[$market])) {
+            return $answer(0, 0, 'unknown_market');
+        }
+
+        if ($provider !== null && trim($provider) !== '') {
+            return $this->refreshVariantsIfOlder($pluginName, $typeIds, $market, self::providerKey($provider), $maxAgeSeconds);
+        }
+
+        $typeIds = $this->subscribedTypeIds($pluginName, $market, $typeIds);
+        if (empty($typeIds)) {
+            return $answer(0, 0, 'not_subscribed');
+        }
+
+        $floor = $this->requestFloorSeconds($market);
+        $old = $this->typeIdsOlderThan($market, $typeIds, max($maxAgeSeconds, $floor) - self::REQUEST_TOLERANCE_SECONDS);
+        $fresh = count($typeIds) - count($old);
+
+        $due = $this->notAskedFor($market, $old, $floor - self::REQUEST_TOLERANCE_SECONDS);
+        if (empty($due)) {
+            return $answer(0, $fresh);
+        }
+
+        $this->rememberAsked($market, $due, $floor);
+        Log::info("[Manager Core] '{$pluginName}' asked for " . count($due) . " type(s) in '{$market}' to be fetched again");
+        $this->dispatchRequested($market, $due, $pluginName);
+
+        return $answer(count($due), $fresh);
+    }
+
+    /**
+     * The fetch a plugin asked for, from the job refreshIfOlder queued. The
+     * job may have waited on the queue while a scheduled refresh ran, so
+     * what has a new price by now is left out.
+     *
+     * A type that fails is not tried again from here: the plugin asks again,
+     * and gets it once the provider's wait is over.
+     */
+    public function refreshRequested(string $market, array $typeIds, string $pluginName): void
+    {
+        $typeIds = $this->typeIdsOlderThan($market, array_map('intval', $typeIds),
+            $this->requestFloorSeconds($market) - self::REQUEST_TOLERANCE_SECONDS);
+        if (empty($typeIds)) {
+            return;
+        }
+
+        $this->refreshMarket($market, $typeIds, null, false, self::TRIGGER_REQUEST, $pluginName);
+    }
+
+    /**
+     * The youngest a stored price at this market may be before a plugin's
+     * ask fetches it again. Set per provider: one Janice key serves every
+     * plugin, and the others publish no faster than this anyway.
+     */
+    protected function requestFloorSeconds(string $market): int
+    {
+        return $this->providerFloorSeconds($this->resolveMarketProvider($market) ?? 'fuzzwork');
+    }
+
+    /**
+     * Which of these types the plugin is subscribed to at the market.
+     *
+     * @return int[]
+     */
+    protected function subscribedTypeIds(string $pluginName, string $market, array $typeIds): array
+    {
+        $subscribed = [];
+        foreach (array_chunk($typeIds, 1000) as $chunk) {
+            $rows = TypeSubscription::where('plugin_name', $pluginName)->where('market', $market)
+                ->whereIn('type_id', $chunk)->pluck('type_id');
+            foreach ($rows as $typeId) {
+                $subscribed[] = (int) $typeId;
+            }
+        }
+
+        return array_values(array_unique($subscribed));
+    }
+
+    /**
+     * Which of these types have no price at the market stored in the last
+     * $seconds, on either side. Both sides are stored by the same fetch, and
+     * a side nobody has an order on keeps its old time.
+     *
+     * @return int[]
+     */
+    protected function typeIdsOlderThan(string $market, array $typeIds, int $seconds): array
+    {
+        $typeIds = array_values(array_unique($typeIds));
+        $since = now()->subSeconds($seconds);
+
+        $young = [];
+        foreach (array_chunk($typeIds, 1000) as $chunk) {
+            $rows = MarketPrice::where('market', $market)->whereIn('type_id', $chunk)
+                ->where('updated_at', '>=', $since)->distinct()->pluck('type_id');
+            foreach ($rows as $typeId) {
+                $young[(int) $typeId] = true;
+            }
+        }
+
+        return array_values(array_filter($typeIds, fn ($typeId) => !isset($young[$typeId])));
+    }
+
+    /**
+     * Leave out the types already asked for in the last $seconds. A type the
+     * provider has no price for, or failed on, stays old however often it is
+     * fetched, and without this every ask would fetch it again.
+     *
+     * @return int[]
+     */
+    protected function notAskedFor(string $market, array $typeIds, int $seconds): array
+    {
+        if (empty($typeIds)) {
+            return [];
+        }
+
+        try {
+            $asked = (array) Cache::get(self::askedKey($market), []);
+        } catch (\Throwable $e) {
+            return $typeIds;
+        }
+
+        $since = now()->getTimestamp() - $seconds;
+
+        return array_values(array_filter($typeIds, fn ($typeId) => ($asked[$typeId] ?? 0) <= $since));
+    }
+
+    /** Note that these types were asked for now, and drop the notes too old to matter. */
+    protected function rememberAsked(string $market, array $typeIds, int $seconds): void
+    {
+        try {
+            $now = now()->getTimestamp();
+            $asked = array_filter((array) Cache::get(self::askedKey($market), []), fn ($at) => $at > $now - $seconds);
+
+            foreach ($typeIds as $typeId) {
+                $asked[$typeId] = $now;
+            }
+
+            Cache::put(self::askedKey($market), $asked, $seconds);
+        } catch (\Throwable $e) {
+            Log::warning("[Manager Core] Could not note what was asked for in '{$market}': " . $e->getMessage());
+        }
+    }
+
+    /** These types were not fetched after all, so the next ask may have them. */
+    protected function forgetAsked(string $market, array $typeIds): void
+    {
+        try {
+            $asked = (array) Cache::get(self::askedKey($market), []);
+            foreach ($typeIds as $typeId) {
+                unset($asked[$typeId]);
+            }
+
+            Cache::put(self::askedKey($market), $asked, $this->requestFloorSeconds($market));
+        } catch (\Throwable $e) {
+            // The note runs out by itself.
+        }
+    }
+
+    /** Queue the fetch a plugin asked for. Not through the first-fetch window: these types have prices. */
+    protected function dispatchRequested(string $market, array $typeIds, string $pluginName): void
+    {
+        RefreshMarketPricesJob::dispatch($market, array_values($typeIds), false, false, $pluginName);
+    }
+
+    /** Cache key for when each type at a market was last asked for by a plugin. */
+    private static function askedKey(string $market): string
+    {
+        return 'mc.pricing.refresh_asked.' . $market;
+    }
+
+    /** Cache key that marks a market as being refreshed right now. */
+    private static function refreshingKey(string $market): string
+    {
+        return 'mc.pricing.refreshing.' . $market;
+    }
+
+    /**
+     * Unregister type subscriptions owned by a given plugin: all of them,
+     * one market's, or only the named types.
      *
      * Used by plugins switching away from Manager Core as their pricing
      * provider — e.g. Mining Manager's `unsubscribeFromManagerCore` switching
@@ -1047,25 +1532,52 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
      * @param string|null $market      Optional market filter. null = remove
      *                                 ALL the plugin's subscriptions across
      *                                 every market.
+     * @param int[]|null  $typeIds     Only these types, for a plugin that
+     *                                 stops needing some. null = every type
+     *                                 in scope. An empty list removes none.
      * @return int Count of subscription rows removed.
      */
-    public function unregisterTypes($pluginName, $market = null): int
+    public function unregisterTypes($pluginName, $market = null, ?array $typeIds = null): int
     {
-        $query = TypeSubscription::where('plugin_name', $pluginName);
+        // An empty list names no types, so it removes none. Only null means
+        // every type: a plugin passing what it worked out to drop must not
+        // lose the whole market when that came out empty.
+        if ($typeIds !== null) {
+            $typeIds = array_values(array_unique(array_map('intval', $typeIds)));
 
-        if ($market !== null) {
-            $query->where('market', $market);
+            if (empty($typeIds)) {
+                return 0;
+            }
         }
 
-        $count = $query->delete();
+        $count = $this->deleteSubscriptions((string) $pluginName, $market !== null ? (string) $market : null, $typeIds);
 
-        if ($market !== null) {
-            Log::info("[Manager Core] Plugin '{$pluginName}' unregistered {$count} type subscriptions in market '{$market}'");
-        } else {
-            Log::info("[Manager Core] Plugin '{$pluginName}' unregistered {$count} type subscriptions across all markets");
+        $what = $typeIds === null ? "{$count} type subscriptions" : "{$count} of " . count($typeIds) . ' named type subscriptions';
+        $where = $market !== null ? "in market '{$market}'" : 'across all markets';
+        Log::info("[Manager Core] Plugin '{$pluginName}' unregistered {$what} {$where}");
+
+        return $count;
+    }
+
+    /** Delete a plugin's subscriptions: all of them, one market's, or the named types. */
+    protected function deleteSubscriptions(string $pluginName, ?string $market, ?array $typeIds): int
+    {
+        $scope = function () use ($pluginName, $market) {
+            $query = TypeSubscription::where('plugin_name', $pluginName);
+
+            return $market !== null ? $query->where('market', $market) : $query;
+        };
+
+        if ($typeIds === null) {
+            return (int) $scope()->delete();
         }
 
-        return (int) $count;
+        $count = 0;
+        foreach (array_chunk($typeIds, 1000) as $chunk) {
+            $count += (int) $scope()->whereIn('type_id', $chunk)->delete();
+        }
+
+        return $count;
     }
 
     /**
@@ -1135,19 +1647,81 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
      *
      * @param string      $market       Market key (jita, citadel keys, etc.)
      * @param array|null  $typeIds      Specific type IDs to update (null = all subscribed)
-     * @param string|null $providerOverride Optional provider key to use instead
-     *                                  of the per-market routing — used by the
-     *                                  per-appraisal price-provider selector
-     *                                  and the Diagnostic page's Test Provider
-     *                                  button. Values: 'esi' (a.k.a. MCPraisal),
-     *                                  'janice', 'fuzzwork', 'goonpraisal',
-     *                                  'seat'. Null = use the per-market
-     *                                  provider on manager_core_markets.
+     * @param string|null $providerOverride Optional provider key to ask alone
+     *                                  instead of the per-market routing:
+     *                                  'esi' (a.k.a. MCPraisal), 'janice',
+     *                                  'fuzzwork', 'goonpraisal', 'seat'. It
+     *                                  stores nothing unless it is the market's
+     *                                  own provider (see askProviderAlone).
+     *                                  Null = use the per-market provider on
+     *                                  manager_core_markets.
+     * @param string      $trigger      What set the refresh off, for the
+     *                                  pricing.market_refreshed event: one of
+     *                                  the TRIGGER_ constants.
      * @return void
      */
-    public function updatePrices($market = 'jita', $typeIds = null, ?string $providerOverride = null)
+    public function updatePrices($market = 'jita', $typeIds = null, ?string $providerOverride = null, string $trigger = self::TRIGGER_SCHEDULE)
     {
-        $this->refreshMarket((string) $market, $typeIds, $providerOverride, true);
+        $this->refreshMarket((string) $market, $typeIds, $providerOverride, true, $trigger);
+    }
+
+    /**
+     * What one provider says these types cost at a market, for a provider
+     * picked on one appraisal or by a Diagnostics test. Stored under the
+     * market only when it is the market's own provider; see askProviderAlone.
+     *
+     * @return array<int, array{buy: ?array, sell: ?array}|null> keyed by type
+     *         id; null, or a null side, where the provider gave no price
+     */
+    public function pricesFromProvider(string $market, array $typeIds, string $providerKey): array
+    {
+        $typeIds = array_values(array_unique(array_map('intval', $typeIds)));
+
+        return empty($typeIds) ? [] : $this->askProviderAlone($market, $typeIds, $providerKey);
+    }
+
+    /**
+     * A provider picked for one appraisal or one test is asked on its own:
+     * nothing stands in for it, nothing is tried again, and the market's
+     * status stays about the market's own provider.
+     *
+     * Only the market's own provider stores what it fetches, as a refresh
+     * would. Every plugin reading the market gets the market's rows, so
+     * another provider's answer goes to the caller alone. MCPraisal reads a
+     * structure only for a market set to it, so at any other market it
+     * fetches without storing too (see ESIPriceProvider).
+     */
+    protected function askProviderAlone(string $market, array $typeIds, string $providerKey): array
+    {
+        $provider = $this->getPriceProvider($providerKey);
+
+        if (!$provider->isAvailable()) {
+            Log::error("[Manager Core] Price provider '{$provider->getName()}' is not available");
+
+            return [];
+        }
+
+        $stores = $providerKey === ($this->resolveMarketProvider($market) ?? 'fuzzwork');
+
+        $prices = $provider->getPrices($typeIds, $market, $stores);
+
+        if ($stores) {
+            $this->bumpPriceCacheVersion($market);
+        }
+
+        // MCPraisal answers with the cached price for anything it couldn't
+        // fetch now. Only what it fetched is its answer.
+        $fresh = $provider->lastFreshTypeIds();
+        if ($fresh !== null) {
+            $fresh = array_flip(array_map('intval', $fresh));
+            foreach (array_keys($prices) as $typeId) {
+                if (!isset($fresh[(int) $typeId])) {
+                    $prices[$typeId] = null;
+                }
+            }
+        }
+
+        return $prices;
     }
 
     /**
@@ -1157,21 +1731,37 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
      */
     public function retryPrices(string $market, array $typeIds): void
     {
-        $this->refreshMarket($market, $typeIds, null, false);
+        $this->refreshMarket($market, $typeIds, null, false, self::TRIGGER_RETRY);
     }
 
-    protected function refreshMarket(string $market, $typeIds, ?string $providerOverride, bool $mayRetry): void
+    /**
+     * @param string      $trigger What set the refresh off (a TRIGGER_ constant).
+     * @param string|null $for     The one plugin the refresh is for, when it
+     *                             was made at a plugin's request. Null when it
+     *                             is for every plugin subscribed to the types.
+     */
+    protected function refreshMarket(string $market, $typeIds, ?string $providerOverride, bool $mayRetry,
+        string $trigger = self::TRIGGER_SCHEDULE, ?string $for = null): void
     {
-        // If no specific type IDs provided, get all subscribed types
+        // Only a refresh of everything subscribed is the scheduled one: a test
+        // or an appraisal names its types and says nothing about the schedule.
+        $everything = $typeIds === null;
+
+        // If no specific type IDs provided, get all subscribed types. A
+        // variant through the market's own provider is the market's own
+        // price, so it is fetched here too.
         if ($typeIds === null) {
             $subscribedTypes = $this->getSubscribedTypes($market);
 
-            if (!isset($subscribedTypes[$market])) {
+            $typeIds = array_merge(
+                isset($subscribedTypes[$market]) ? $subscribedTypes[$market]->pluck('type_id')->unique()->toArray() : [],
+                $this->variantTypeIdsFor($market, $this->resolveMarketProvider($market) ?? 'fuzzwork')
+            );
+
+            if (empty($typeIds)) {
                 Log::info("[Manager Core] No subscribed types for market: {$market}");
                 return;
             }
-
-            $typeIds = $subscribedTypes[$market]->pluck('type_id')->unique()->toArray();
         }
 
         $typeIds = array_values(array_unique(array_map('intval', (array) $typeIds)));
@@ -1179,6 +1769,50 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
             return;
         }
 
+        // A plugin's ask gives way to a refresh of the same market already
+        // running: that one is fetching the same prices or just has. Every
+        // other refresh runs as it always did, marked or not.
+        $marked = $this->markRefreshing($market);
+        if (!$marked && $trigger === self::TRIGGER_REQUEST) {
+            Log::info("[Manager Core] '{$market}' is being refreshed already, so the " . count($typeIds) . ' type(s) asked for wait for the next ask');
+            $this->forgetAsked($market, $typeIds);
+
+            return;
+        }
+
+        try {
+            $this->fetchForMarket($market, $typeIds, $providerOverride, $mayRetry, $trigger, $for, $everything);
+        } finally {
+            if ($marked) {
+                $this->doneRefreshing($market);
+            }
+        }
+    }
+
+    /** Note that a market is being refreshed. False when another refresh has it marked. */
+    protected function markRefreshing(string $market): bool
+    {
+        try {
+            return (bool) Cache::add(self::refreshingKey($market), now()->toIso8601String(), self::REFRESHING_KEPT_SECONDS);
+        } catch (\Throwable $e) {
+            // Without a cache nothing can be marked, and the refresh matters more.
+            return true;
+        }
+    }
+
+    protected function doneRefreshing(string $market): void
+    {
+        try {
+            Cache::forget(self::refreshingKey($market));
+        } catch (\Throwable $e) {
+            // The mark runs out by itself.
+        }
+    }
+
+    /** Ask the market's provider, store what it answers and say so. */
+    protected function fetchForMarket(string $market, array $typeIds, ?string $providerOverride, bool $mayRetry,
+        string $trigger, ?string $for, bool $everything): void
+    {
         // Resolution order for which provider class to use:
         //   1. Explicit override (from per-appraisal selector or test)
         //   2. Per-market provider stored on the manager_core_markets row
@@ -1195,24 +1829,15 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
                 : " (provider: {$effectiveProvider})"));
 
         if ($providerOverride !== null) {
-            // A provider picked for one appraisal, or by a Diagnostics test,
-            // is asked on its own: nothing stands in for it, nothing is
-            // tried again, and the market's status stays about the market's
-            // own provider. What it can't price keeps the cached price the
-            // appraisal then reads.
-            $priceProvider = $this->getPriceProvider($providerOverride);
+            $this->askProviderAlone($market, $typeIds, $providerOverride);
 
-            if (!$priceProvider->isAvailable()) {
-                Log::error("[Manager Core] Price provider '{$priceProvider->getName()}' is not available");
-                return;
-            }
-
-            $priceProvider->getPrices($typeIds, $market);
-        } else {
-            $outcome = $this->fetchWithFallback($effectiveProvider, $market, $typeIds, true);
-            $retrying = $mayRetry && $this->scheduleRetry($market, $outcome);
-            $this->recordMarketOutcome($market, $outcome, $retrying);
+            return;
         }
+
+        $outcome = $this->fetchWithFallback($effectiveProvider, $market, $typeIds, true);
+        $retrying = $mayRetry && $this->scheduleRetry($market, $outcome);
+        $this->recordMarketOutcome($market, $outcome, $retrying);
+        $this->copyToVariants($market, $effectiveProvider, $outcome, $trigger, $for);
 
         // Bump the per-market cache version so any cached getPrice/getPrices
         // results for this market are invalidated. Without this, a previous
@@ -1222,6 +1847,100 @@ class PricingService implements \ManagerCore\Contracts\PricingServiceInterface
         // (single Redis INCR) and ensures the very next getPrice call reads
         // straight from the DB.
         $this->bumpPriceCacheVersion($market);
+
+        if ($everything && $trigger === self::TRIGGER_SCHEDULE && !empty($outcome['priced'])) {
+            $this->noteScheduledRefresh();
+        }
+
+        $this->announceRefresh($market, $outcome['priced'] ?? [], count($typeIds), $trigger, $for);
+    }
+
+    /**
+     * Keep when the scheduled refresh last stored a price, for the Watchdog
+     * and Diagnostics. A run that stored nothing is not noted: to them it is
+     * as good as no run.
+     */
+    protected function noteScheduledRefresh(): void
+    {
+        try {
+            \ManagerCore\Models\Setting::set(self::LAST_SCHEDULED_SETTING, now()->toIso8601String(), 'pricing');
+        } catch (\Throwable $e) {
+            Log::warning('[Manager Core] Could not note the scheduled refresh: ' . $e->getMessage());
+        }
+    }
+
+    /** When a scheduled refresh last stored a price, or null if none has since this was first kept. */
+    public static function lastScheduledRefreshAt(): ?\Carbon\Carbon
+    {
+        try {
+            $at = \ManagerCore\Models\Setting::get(self::LAST_SCHEDULED_SETTING);
+
+            return is_string($at) && $at !== '' ? \Carbon\Carbon::parse($at) : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Tell plugins that keep their own copy of prices that a market's are
+     * in, once per refresh and after they are stored and readable. A refresh
+     * that stored nothing has nothing to announce: if its retry prices
+     * something, the retry announces it.
+     *
+     * `plugins` is who the refresh was for. A plugin not named in it need
+     * not read anything: a few types another plugin just subscribed, or a
+     * refresh one plugin asked for between scheduled ones, is not a reason
+     * for every plugin at the market to copy all its prices again.
+     */
+    protected function announceRefresh(string $market, array $pricedIds, int $asked, string $trigger, ?string $for): void
+    {
+        if (empty($pricedIds)) {
+            return;
+        }
+
+        try {
+            $this->publishRefreshed([
+                'market' => $market,
+                // To the microsecond: it is in the event's key, and two refreshes of
+                // one market in the same second are still two events.
+                'refreshed_at' => now()->format('Y-m-d\TH:i:s.uP'),
+                'plugins' => $for !== null ? [$for] : $this->subscribersOf($market, $pricedIds),
+                'type_count' => $asked,
+                'stored_count' => count($pricedIds),
+                'trigger' => $trigger,
+            ]);
+        } catch (\Throwable $e) {
+            // The prices are stored either way. A plugin that missed the event
+            // still reads them on its own schedule.
+            Log::warning("[Manager Core] Could not announce the refresh of '{$market}': " . $e->getMessage());
+        }
+    }
+
+    /** Publish pricing.market_refreshed. */
+    protected function publishRefreshed(array $payload): void
+    {
+        \ManagerCore\Topics::publish('pricing.market_refreshed', $payload);
+    }
+
+    /**
+     * The plugins subscribed to any of these types at the market.
+     *
+     * @return string[]
+     */
+    protected function subscribersOf(string $market, array $typeIds): array
+    {
+        $plugins = [];
+        foreach (array_chunk($typeIds, 1000) as $chunk) {
+            $names = TypeSubscription::where('market', $market)->whereIn('type_id', $chunk)->distinct()->pluck('plugin_name');
+            foreach ($names as $name) {
+                $plugins[(string) $name] = true;
+            }
+        }
+
+        $plugins = array_keys($plugins);
+        sort($plugins);
+
+        return $plugins;
     }
 
     /**

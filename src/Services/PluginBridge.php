@@ -172,11 +172,12 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
     protected function scanForPlugins()
     {
         $discoveredPlugins = [];
-        $compatiblePlugins = config('manager-core.bridge.compatible_plugins', []);
+        $compatiblePlugins = static::suitePlugins();
 
         // Plugins from outside the suite, from the rows registerSelf() wrote.
-        // They go through the same signals and states as the suite.
-        $externalPlugins = $this->getSelfRegisteredPlugins($compatiblePlugins);
+        // They go through the same signals and states as the suite. A suite
+        // plugin left out of the list above is still never one of them.
+        $externalPlugins = $this->getSelfRegisteredPlugins(config('manager-core.bridge.compatible_plugins', []));
 
         // Pricing-type subscriptions
         $activeSubscriptions = $this->getActivePricingSubscriptionCounts();
@@ -313,6 +314,27 @@ class PluginBridge implements \ManagerCore\Contracts\PluginBridgeInterface
         }
 
         return $discoveredPlugins;
+    }
+
+    /**
+     * The suite's plugins as this install lists them: every one in
+     * compatible_plugins, less those marked only_when_installed whose class
+     * doesn't load. Every other plugin shows as Offline where it isn't
+     * installed.
+     *
+     * @return array [plugin_key => compatible_plugins entry]
+     */
+    public static function suitePlugins(): array
+    {
+        $plugins = (array) config('manager-core.bridge.compatible_plugins', []);
+
+        return array_filter($plugins, fn ($plugin) => empty($plugin['only_when_installed'])
+            || (!empty($plugin['class']) && static::classLoads((string) $plugin['class'])));
+    }
+
+    protected static function classLoads(string $class): bool
+    {
+        return class_exists($class);
     }
 
     /**

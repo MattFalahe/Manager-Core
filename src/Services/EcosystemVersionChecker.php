@@ -66,8 +66,9 @@ class EcosystemVersionChecker
     private const PACKAGE_NAME_PATTERN = '#^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$#';
 
     /**
-     * Return a status map for EVERY plugin in compatible_plugins config
-     * PLUS Manager Core itself.
+     * Return a status map for every plugin this install lists
+     * (PluginBridge::suitePlugins(), so Packagist is never asked about one
+     * listed only where it is installed) PLUS Manager Core itself.
      *
      * The returned map includes a special 'manager-core' entry so the
      * Plugin Bridge page can render MC's version badge on its central
@@ -79,7 +80,7 @@ class EcosystemVersionChecker
      */
     public function getStatusForAllPlugins(): array
     {
-        $plugins = config('manager-core.bridge.compatible_plugins', []);
+        $plugins = PluginBridge::suitePlugins();
         $out = [];
         foreach (array_keys($plugins) as $pluginKey) {
             $out[$pluginKey] = $this->getStatusForPlugin($pluginKey);

@@ -58,6 +58,12 @@ class TypeSubscription extends Model
             'color' => 'warning',
             'description' => 'Managed by Structure Manager plugin.',
         ],
+        'market-manager' => [
+            'label' => 'Market Manager',
+            'icon' => 'fas fa-chart-line',
+            'color' => 'primary',
+            'description' => 'Managed by Market Manager plugin. An item is subscribed while someone watches its price.',
+        ],
     ];
 
     /**

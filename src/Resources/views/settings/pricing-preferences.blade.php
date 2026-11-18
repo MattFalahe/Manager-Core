@@ -15,7 +15,50 @@
     .pp-badge-default    { background: #1c6f3e; color: #d4f4e2; padding: 0.15rem 0.45rem; border-radius: 0.2rem; font-size: 0.72rem; font-weight: 700; }
     .pp-form-inline > * { display: inline-block; vertical-align: middle; }
     .pp-form-inline select { width: auto; min-width: 8rem; }
+    .pp-note { color: #9aa3b3; font-size: 0.78rem; margin-top: 0.3rem; max-width: 22rem; }
+    .pp-note-warn { color: #f0c36d; }
 </style>
+@endpush
+
+@push('javascript')
+@php
+    $providerNames = ['esi' => 'MCPraisal', 'fuzzwork' => 'Fuzzwork', 'janice' => 'Janice', 'goonpraisal' => 'Goonpraisal', 'seat' => 'SeAT'];
+    $ownLabels = [];
+    foreach ($markets as $marketKey => $cfg) {
+        $own = $cfg['provider'] ?? 'fuzzwork';
+        $ownLabels[$marketKey] = $providerNames[$own] ?? ucfirst($own);
+    }
+@endphp
+<script>
+(function () {
+    // Which provider can't price which market, so the provider dropdown
+    // follows the market picked beside it.
+    var reasons = @json($placeReasons);
+    var ownLabels = @json($ownLabels);
+
+    $('.pp-market').on('change', function () {
+        var market = $(this).val();
+        var provider = $(this).closest('form').find('.pp-provider');
+
+        provider.find('option').each(function () {
+            var option = $(this);
+            if (option.val() === '') {
+                option.text("Use market's provider (" + (ownLabels[market] || '') + ')');
+                return;
+            }
+
+            var reason = (reasons[market] || {})[option.val()] || null;
+            option.prop('disabled', reason !== null);
+            option.attr('title', reason || '');
+            option.text(option.data('label') + (reason !== null ? " (can't price this market)" : ''));
+        });
+
+        if (provider.find('option:selected').prop('disabled')) {
+            provider.val('');
+        }
+    });
+})();
+</script>
 @endpush
 
 @section('full')
@@ -48,12 +91,12 @@
                 to track the plugin's suggested default again.
             </p>
             <p class="text-muted" style="font-size:0.85rem;">
-                <strong>Provider override</strong> (rightmost dropdown) lets one plugin route through a
-                different provider than the market's configured one. Example: Mining Manager reads at
-                Jita via Janice (for tax accuracy) while every other plugin reading at Jita continues
-                through Fuzzwork. Default "Use market's provider" reads from MC's local cache;
-                an explicit override does a live upstream fetch per refresh (bypasses the cache because
-                the cache can't store per-provider variants for the same market).
+                <strong>Provider override</strong> (rightmost dropdown) lets one plugin read a market
+                through a different provider than the market's own. Example: Buyback Manager reads Jita
+                through Janice while every other plugin reading Jita stays on Fuzzwork. Manager Core keeps
+                that plugin's prices through the provider and refreshes them with the market, so a read is
+                answered from stored prices. Only an item with no price yet is fetched while the plugin
+                waits. A provider that can't price a market can't be picked for it.
             </p>
 
             @if($preferences->isEmpty())
@@ -104,7 +147,7 @@
                                 <td colspan="3">
                                     <form method="POST" action="{{ route('manager-core.pricing-preferences.update', $pref->id) }}" class="pp-form-inline">
                                         @csrf
-                                        <select name="market" class="form-control form-control-sm">
+                                        <select name="market" class="form-control form-control-sm pp-market">
                                             @php
                                                 // Group markets by type for the dropdown so operators see
                                                 // hubs and citadels separated. After the citadel-market work
@@ -153,13 +196,20 @@
                                              specific provider routes THIS plugin through that
                                              provider while leaving everyone else reading the
                                              same market on its configured provider. --}}
-                                        <select name="provider_override" class="form-control form-control-sm">
+                                        <select name="provider_override" class="form-control form-control-sm pp-provider">
                                             <option value="" {{ empty($pref->provider_override) ? 'selected' : '' }}>
                                                 Use market's provider ({{ $marketProviderLabel }})
                                             </option>
                                             @foreach(\ManagerCore\Models\PricingPreference::VALID_PROVIDER_OVERRIDES as $providerKey)
-                                                <option value="{{ $providerKey }}" {{ $pref->provider_override === $providerKey ? 'selected' : '' }}>
-                                                    {{ $providerLabels[$providerKey] ?? ucfirst($providerKey) }}
+                                                @php
+                                                    // The saved choice stays pickable, so the row shows
+                                                    // what is saved; saving it again says why it can't be.
+                                                    $placeReason = $placeReasons[$pref->market][$providerKey] ?? null;
+                                                    $isSaved = $pref->provider_override === $providerKey;
+                                                @endphp
+                                                <option value="{{ $providerKey }}" data-label="{{ $providerLabels[$providerKey] ?? ucfirst($providerKey) }}"
+                                                        title="{{ $placeReason ?? '' }}" {{ $isSaved ? 'selected' : '' }} {{ $placeReason !== null && !$isSaved ? 'disabled' : '' }}>
+                                                    {{ $providerLabels[$providerKey] ?? ucfirst($providerKey) }}{{ $placeReason !== null ? " (can't price this market)" : '' }}
                                                 </option>
                                             @endforeach
                                         </select>
@@ -173,6 +223,19 @@
                                         <span class="pp-badge-overridden"><i class="fas fa-user-shield"></i> ADMIN OVERRIDE</span>
                                     @else
                                         <span class="pp-badge-default"><i class="fas fa-cube"></i> PLUGIN DEFAULT</span>
+                                    @endif
+                                    @php
+                                        $override = $overrides[$pref->plugin_key] ?? null;
+                                    @endphp
+                                    @if($override && $override['reads'] === 'cannot_price')
+                                        <div class="pp-note pp-note-warn">
+                                            <i class="fas fa-exclamation-triangle"></i>
+                                            {{ $override['provider_label'] }} can't price {{ $override['market_name'] }}, so this plugin reads the market's own prices. {{ $override['reason'] }}
+                                        </div>
+                                    @elseif($override && $override['reads'] === 'own')
+                                        <div class="pp-note">{{ $override['provider_label'] }} is {{ $override['market_name'] }}'s own provider, so this reads the market's prices.</div>
+                                    @elseif($override)
+                                        <div class="pp-note">Kept through {{ $override['provider_label'] }}, refreshed with the market.</div>
                                     @endif
                                 </td>
                                 <td class="pp-meta">{{ $pref->notes ?? '-' }}</td>
@@ -203,9 +266,10 @@
                 <code>AVG</code> uses the midpoint of sell.min and buy.max, falling back to whichever side has data.
                 <br>
                 <strong>Provider override:</strong>
-                Default routes through whichever provider the market is configured for on the
-                <a href="{{ route('manager-core.markets.index') }}">Markets page</a> (reads MC's cached prices).
-                An explicit override fetches live from that provider on each refresh — useful when one plugin needs a different price source than the rest of the install (e.g. Mining Manager via Janice for tax accuracy while Structure Manager stays on Fuzzwork for the same market).
+                "Use market's provider" reads the prices of the provider the market is set to on the
+                <a href="{{ route('manager-core.markets.index') }}">Markets page</a>.
+                A named provider's prices are kept for that plugin and refreshed with the market's own, and Diagnostics lists them under Provider variants.
+                Naming the market's own provider reads the market's prices, the same as "Use market's provider".
             </small>
         </div>
     </div>

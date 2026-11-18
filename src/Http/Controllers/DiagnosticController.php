@@ -16,10 +16,12 @@ use ManagerCore\Models\EventLog;
 use ManagerCore\Models\EventSubscription;
 use ManagerCore\Models\MarketPrice;
 use ManagerCore\Models\PriceHistory;
+use ManagerCore\Models\PriceVariant;
 use ManagerCore\Models\PluginRegistry;
 use ManagerCore\Models\PricingPreference;
 use ManagerCore\Models\Setting;
 use ManagerCore\Models\TypeSubscription;
+use ManagerCore\Models\VariantSubscription;
 use ManagerCore\Services\EventBus;
 use ManagerCore\Services\PluginBridge;
 use ManagerCore\Services\PriceProviders\JanicePriceProvider;
@@ -68,7 +70,7 @@ class DiagnosticController extends Controller
             // the size of compatible_plugins let outside plugins push the first
             // number past the second.
             'active_plugins' => count(array_filter($discovered, fn ($p) => ($p['status'] ?? '') === 'active')),
-            'total_plugins' => count(config('manager-core.bridge.compatible_plugins', [])) + count($externalPlugins),
+            'total_plugins' => count(PluginBridge::suitePlugins()) + count($externalPlugins),
             'event_subscriptions' => $safe(fn() => EventSubscription::active()->count()),
             'events_today' => $safe(fn() => EventLog::where('created_at', '>=', now()->startOfDay())->count()),
             'api_tokens' => $safe(fn() => ApiToken::where('is_active', true)->count()),
@@ -81,7 +83,7 @@ class DiagnosticController extends Controller
             'providers_in_use' => $safe(fn() => Market::query()->whereNotNull('provider')->distinct()->pluck('provider')->values()->all(), []),
         ];
 
-        $plugins = config('manager-core.bridge.compatible_plugins', []);
+        $plugins = PluginBridge::suitePlugins();
         // Diagnostic view shows every configured market regardless of
         // enable state — operators want to see "this market is disabled"
         // diagnostics too, not just hide them.
@@ -212,7 +214,7 @@ class DiagnosticController extends Controller
             if ($subName) {
                 $result['subscription_count'] = TypeSubscription::where('plugin_name', $subName)->count();
                 if ($result['subscription_count'] === 0) {
-                    $result['issues'][] = 'No pricing type subscriptions registered — this plugin is configured to use Manager Core pricing but has not subscribed any type IDs yet.';
+                    $result['issues'][] = 'No pricing type subscriptions registered. This plugin is configured to use Manager Core pricing but has not subscribed any type IDs yet.';
                 }
             }
 
@@ -237,7 +239,7 @@ class DiagnosticController extends Controller
         // One fresh discovery for the whole run (see testPluginConnection).
         $this->bridge->discover(true);
 
-        $plugins = config('manager-core.bridge.compatible_plugins', []) + $this->bridge->getExternalPlugins();
+        $plugins = PluginBridge::suitePlugins() + $this->bridge->getExternalPlugins();
         $results = [];
 
         foreach ($plugins as $key => $config) {
@@ -291,39 +293,37 @@ class DiagnosticController extends Controller
         $start = microtime(true);
 
         try {
-            // Pass the dropdown selection as the provider override so the
-            // test actually exercises the requested provider, not whichever
-            // one the per-market routing resolves to. Otherwise the dropdown
-            // is purely decorative — the test always runs whichever provider
-            // the markets row says, defeating the point of the picker.
-            $this->pricing->updatePrices($market, $testTypeIds, $provider);
+            // The provider picked in the dropdown, not the market's own, and
+            // its answer read straight back: another provider's prices are
+            // not stored under the market, where every plugin reading it
+            // would get them, and an old stored price can't pass for an
+            // answer.
+            $answers = $this->pricing->pricesFromProvider($market, $testTypeIds, $provider);
             $duration = round((microtime(true) - $start) * 1000, 2);
 
-            // Check what was stored
             $results = [];
             $successCount = 0;
             $typeNames = $this->sde->typeNames($testTypeIds);
 
             foreach ($testTypeIds as $typeId) {
-                $price = MarketPrice::where('type_id', $typeId)
-                    ->where('market', $market)
-                    ->where('price_type', 'sell')
-                    ->first();
+                $sell = $answers[$typeId]['sell'] ?? null;
+                $sell = is_array($sell) ? $sell : null;
+                $updatedAt = $sell['updated_at'] ?? null;
 
-                $result = [
+                $results[] = [
                     'type_id' => $typeId,
                     'type_name' => $typeNames[$typeId] ?? 'Unknown',
-                    'has_price' => $price !== null,
-                    'price_avg' => $price ? (float) $price->price_avg : null,
-                    'price_min' => $price ? (float) $price->price_min : null,
-                    'updated_at' => $price ? $price->updated_at->toIso8601String() : null,
+                    'has_price' => $sell !== null,
+                    'price_avg' => $sell !== null ? (float) ($sell['avg'] ?? 0) : null,
+                    'price_min' => $sell !== null ? (float) ($sell['min'] ?? 0) : null,
+                    'updated_at' => $updatedAt instanceof \DateTimeInterface
+                        ? \Carbon\Carbon::instance($updatedAt)->toIso8601String()
+                        : ($sell !== null ? (is_string($updatedAt) ? $updatedAt : now()->toIso8601String()) : null),
                 ];
 
-                if ($price) {
+                if ($sell !== null) {
                     $successCount++;
                 }
-
-                $results[] = $result;
             }
 
             return response()->json([
@@ -545,6 +545,14 @@ class DiagnosticController extends Controller
             ->groupBy('plugin_name', 'market')
             ->get();
 
+        // Prices plugins asked for through a provider they named, per market
+        // and provider.
+        try {
+            $variants = $this->pricing->variantHealth();
+        } catch (\Throwable $e) {
+            $variants = [];
+        }
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -552,6 +560,8 @@ class DiagnosticController extends Controller
                 'plugins' => $pluginSummary,
                 'total_subscriptions' => TypeSubscription::count(),
                 'total_unique_types' => TypeSubscription::distinct('type_id')->count('type_id'),
+                'variants' => $variants,
+                'stale_after_minutes' => $this->resolvePriceRefreshIntervalMinutes() * 2,
             ],
         ]);
     }
@@ -1070,11 +1080,12 @@ class DiagnosticController extends Controller
                 'manager_core_plugin_registry', 'manager_core_settings',
                 'manager_core_markets', 'manager_core_event_subscriptions',
                 'manager_core_event_log', 'manager_core_api_tokens',
+                VariantSubscription::TABLE, PriceVariant::TABLE,
             ];
             $missing = array_values(array_filter($required, fn($t) => !Schema::hasTable($t)));
             return empty($missing)
                 ? ['status' => 'pass', 'message' => count($required) . ' core tables present.']
-                : ['status' => 'fail', 'message' => count($missing) . ' table(s) missing — run migrations.', 'detail' => implode(', ', $missing)];
+                : ['status' => 'fail', 'message' => count($missing) . ' table(s) missing. Run migrations.', 'detail' => implode(', ', $missing)];
         });
 
         // 3. Cache read/write
@@ -1119,7 +1130,7 @@ class DiagnosticController extends Controller
             }
             return empty($bad)
                 ? ['status' => 'pass', 'message' => 'SDE resolves known mineral type IDs.']
-                : ['status' => 'warn', 'message' => 'SDE did not resolve type ID(s): ' . implode(', ', $bad) . ' — the SDE may not be imported.'];
+                : ['status' => 'warn', 'message' => 'SDE did not resolve type ID(s): ' . implode(', ', $bad) . '. The SDE may not be imported.'];
         });
 
         // 6. Per-market provider config — scans every market row and
@@ -1135,7 +1146,7 @@ class DiagnosticController extends Controller
 
             $markets = Market::where('is_enabled', true)->get(['key', 'name', 'provider']);
             if ($markets->isEmpty()) {
-                return ['status' => 'warn', 'message' => 'No enabled markets — enable at least one on the Markets page so plugins have somewhere to read prices from.'];
+                return ['status' => 'warn', 'message' => 'No enabled markets. Enable at least one on the Markets page so plugins have somewhere to read prices from.'];
             }
 
             $unknownProviders = [];
@@ -1164,16 +1175,18 @@ class DiagnosticController extends Controller
                 return ['status' => 'fail', 'message' => 'Market(s) using unknown provider: ' . implode(', ', $unknownProviders)];
             }
 
-            // A plugin's provider override reaches Janice without any market
-            // routing through it.
+            // A plugin's provider override, or a plugin asking for Janice's
+            // prices at a market, reaches Janice without any market routing
+            // through it.
             if (!$needsJaniceKey) {
-                $needsJaniceKey = PricingPreference::where('provider_override', 'janice')->exists();
+                $needsJaniceKey = PricingPreference::where('provider_override', 'janice')->exists()
+                    || (Schema::hasTable(VariantSubscription::TABLE) && VariantSubscription::where('provider', 'janice')->exists());
             }
 
             if ($needsJaniceKey) {
                 $key = Setting::get('pricing.janice_api_key') ?? config('manager-core.pricing.janice.api_key');
                 if (empty($key)) {
-                    return ['status' => 'fail', 'message' => 'A market or a plugin override routes through Janice but no API key is configured. Set it at Settings → Pricing.'];
+                    return ['status' => 'fail', 'message' => 'A market, a plugin override or a plugin\'s prices route through Janice but no API key is configured. Set it at Settings → Pricing.'];
                 }
 
                 // A key can be set and still be turned away.
@@ -1201,19 +1214,96 @@ class DiagnosticController extends Controller
         // pre-v1.0.0). Falls back to 240min if the schedule row is missing
         // or the cron expression doesn't parse cleanly. The
         // pricing.update_frequency CONFIG (env-backed) is decorative now —
-        // ScheduleSeeder hardcodes '0 *_/4 * * *' regardless.
+        // the ScheduleSeeder's expression is what runs.
+        //
+        // Goes by the time the scheduled refresh keeps when it stores a
+        // price. The newest price in the table would stay young over a dead
+        // schedule while a plugin asks for prices in between. Before the
+        // first scheduled run that kept its time, the newest price it is.
         $add('Market price freshness', 'Pricing', function () {
             $total = MarketPrice::count();
             if ($total === 0) {
-                return ['status' => 'warn', 'message' => 'No market prices cached yet — has manager-core:update-prices run?'];
+                return ['status' => 'warn', 'message' => 'No market prices cached yet. Has manager-core:update-prices run?'];
+            }
+            $freq = $this->resolvePriceRefreshIntervalMinutes();
+            $scheduled = \ManagerCore\Services\PricingService::lastScheduledRefreshAt();
+            if ($scheduled) {
+                $ageMin = $scheduled->diffInMinutes(now());
+                if ($ageMin <= $freq * 2) {
+                    return ['status' => 'pass', 'message' => "The scheduled refresh last stored a price {$ageMin} min ago (cron runs every {$freq} min via ScheduleSeeder)."];
+                }
+                return ['status' => 'warn', 'message' => "The scheduled refresh last stored a price {$ageMin} min ago, over twice the {$freq} min cron interval. The scheduler may be down. Prices a plugin asked for since do not count.", 'detail' => "Last scheduled refresh: {$scheduled}"];
             }
             $newest = MarketPrice::max('updated_at');
-            $freq = $this->resolvePriceRefreshIntervalMinutes();
             $ageMin = $newest ? Carbon::parse($newest)->diffInMinutes(now()) : null;
             if ($ageMin !== null && $ageMin <= $freq * 2) {
                 return ['status' => 'pass', 'message' => "Newest price {$ageMin} min old (cron runs every {$freq} min via ScheduleSeeder)."];
             }
-            return ['status' => 'warn', 'message' => "Newest price is {$ageMin} min old — over twice the {$freq} min cron interval. The scheduler may be down.", 'detail' => "Last update: {$newest}"];
+            return ['status' => 'warn', 'message' => "Newest price is {$ageMin} min old, over twice the {$freq} min cron interval. The scheduler may be down.", 'detail' => "Last update: {$newest}"];
+        });
+
+        // 7b. Prices plugins asked for at a market through a provider they
+        // named. Each market and provider is looked at on its own, since one
+        // Janice key can be refused while Fuzzwork answers.
+        $add('Provider variants', 'Pricing', function () {
+            if (!Schema::hasTable(VariantSubscription::TABLE) || !Schema::hasTable(PriceVariant::TABLE)) {
+                return ['status' => 'fail', 'message' => 'The provider variant tables are missing. Run migrations.'];
+            }
+
+            $pairs = $this->pricing->variantHealth();
+            if (empty($pairs)) {
+                return ['status' => 'pass', 'message' => 'No plugin has asked for prices through a provider it named.'];
+            }
+
+            $freq = $this->resolvePriceRefreshIntervalMinutes();
+            $problems = [];
+            foreach ($pairs as $pair) {
+                $where = "{$pair['provider_label']} at {$pair['market_name']}";
+
+                if (!$pair['market_enabled']) {
+                    $problems[] = "{$where}: the market is disabled, so nothing is fetched there";
+                } elseif ($pair['place_reason'] !== null) {
+                    $problems[] = "{$where}: {$pair['place_reason']}";
+                } elseif (!$pair['available']) {
+                    $problems[] = "{$where}: {$pair['provider_label']} is not set up";
+                } elseif ($pair['priced'] === 0) {
+                    $error = $pair['last_fetch']['error'] ?? null;
+                    $problems[] = "{$where}: none of the {$pair['subscribed']} item(s) has a price yet" . ($error ? " (last fetch: {$error})" : '');
+                } elseif ($pair['newest'] !== null && ($age = Carbon::parse($pair['newest'])->diffInMinutes(now())) > $freq * 2) {
+                    $problems[] = "{$where}: the newest price is {$age} min old, over twice the {$freq} min cron interval";
+                }
+            }
+
+            $summary = count($pairs) . ' market and provider combination(s): '
+                . array_sum(array_column($pairs, 'subscribed')) . ' item(s) asked for, '
+                . array_sum(array_column($pairs, 'priced')) . ' with a price.';
+
+            return empty($problems)
+                ? ['status' => 'pass', 'message' => $summary]
+                : ['status' => 'warn', 'message' => $summary . ' ' . count($problems) . ' need a look; see Subscriptions for each.', 'detail' => implode('; ', $problems)];
+        });
+
+        // 7c. Each provider override in Pricing Preferences. One saved before
+        // the page refused a provider that can't price the market reads the
+        // market's own prices, so the plugin isn't getting what was picked.
+        $add('Provider overrides', 'Pricing', function () {
+            $overrides = $this->pricing->overrideHealth(PricingPreference::whereNotNull('provider_override')->where('provider_override', '!=', '')->get());
+            if (empty($overrides)) {
+                return ['status' => 'pass', 'message' => 'No plugin has a provider override in Pricing Preferences.'];
+            }
+
+            $describe = fn (array $o) => "{$o['plugin']}: {$o['provider_label']} at {$o['market_name']}";
+            $unpriceable = array_filter($overrides, fn (array $o) => $o['reads'] === 'cannot_price');
+            if (!empty($unpriceable)) {
+                return ['status' => 'warn', 'message' => count($unpriceable) . " override(s) name a provider that can't price the market, so those plugins read the market's own prices. Pick another provider for them in Pricing Preferences.",
+                    'detail' => implode('; ', array_map(fn (array $o) => $describe($o) . '. ' . $o['reason'], $unpriceable))];
+            }
+
+            $own = count(array_filter($overrides, fn (array $o) => $o['reads'] === 'own'));
+
+            return ['status' => 'pass', 'message' => count($overrides) . ' override(s), ' . (count($overrides) - $own) . ' kept through their provider'
+                . ($own > 0 ? ", {$own} naming the market's own provider and reading its prices" : '') . '.',
+                'detail' => implode('; ', array_map($describe, $overrides))];
         });
 
         // 8. Event dispatch failures (24h)
@@ -1229,7 +1319,7 @@ class DiagnosticController extends Controller
         $add('Event subscriptions', 'Event Bus', function () {
             $count = EventSubscription::active()->count();
             return $count === 0
-                ? ['status' => 'warn', 'message' => 'No active EventBus subscriptions — no plugin is listening for cross-plugin events.']
+                ? ['status' => 'warn', 'message' => 'No active EventBus subscriptions: no plugin is listening for cross-plugin events.']
                 : ['status' => 'pass', 'message' => "{$count} active EventBus subscription(s)."];
         });
 
@@ -1254,7 +1344,7 @@ class DiagnosticController extends Controller
             }
             return $failed === 0
                 ? ['status' => 'pass', 'message' => 'No failed queue jobs.']
-                : ['status' => 'warn', 'message' => "{$failed} failed queue job(s) — check the SeAT queue worker."];
+                : ['status' => 'warn', 'message' => "{$failed} failed queue job(s). Check the SeAT queue worker."];
         });
 
         // 12. ESI key pool
@@ -1264,7 +1354,7 @@ class DiagnosticController extends Controller
             }
             $total = DB::table('manager_core_esi_key_holders')->count();
             if ($total === 0) {
-                return ['status' => 'info', 'message' => 'ESI key pool is empty — fast-poll has no directors to call.'];
+                return ['status' => 'info', 'message' => 'ESI key pool is empty, so fast-poll has no directors to call.'];
             }
             $enabled = DB::table('manager_core_esi_key_holders')->where('enabled', true)->count();
             if ($enabled === 0) {
@@ -1406,7 +1496,7 @@ class DiagnosticController extends Controller
                 'steps' => $steps,
                 'subscriptions' => $subscriptions,
                 'errors' => $errors,
-                'note' => 'Subscriptions are matched against the current subscription table. A subscription added or removed since this event was published may not reflect what happened at dispatch time — the recorded status and subscriber_count are authoritative for that.',
+                'note' => 'Subscriptions are matched against the current subscription table. A subscription added or removed since this event was published may not reflect what happened at dispatch time: the recorded status and subscriber_count are authoritative for that.',
             ],
         ]);
     }

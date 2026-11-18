@@ -130,9 +130,9 @@ class AppraisalService
             $appraisal->is_private = $isPrivate;
             $appraisal->parser_info = ['parser' => $parseResult['parser']];
 
-            // Only persist when the column exists (migration 000021). Guarded
-            // so older installs upgrading mid-flight don't blow up on the
-            // first appraisal after pull.
+            // Only persist when the column exists. Migration 000004 creates
+            // it only with the table, so a table made before 1.0.0 may not
+            // have it, and the appraisal must still save.
             if (Schema::hasColumn('manager_core_appraisals', 'price_provider')) {
                 $appraisal->price_provider = $priceProvider;
             }
@@ -163,17 +163,22 @@ class AppraisalService
             // Auto-subscribe to these type IDs for future price updates
             $this->subscribeToTypes($items, $market);
 
-            // Fetch prices immediately for this appraisal. When the operator
-            // picked a per-appraisal provider, route through it instead of the
-            // global default so the Janice / Fuzzwork / MCPraisal selection
-            // they made actually drives the fetch.
+            // Fetch prices immediately for this appraisal. A provider the
+            // operator picked for it prices this appraisal only: what it
+            // answers is laid over the market's cached prices here, and the
+            // market keeps its own provider's prices for everyone else.
             $typeIds = array_column($items, 'type_id');
             Log::info("[Manager Core] Fetching prices for {$market} for " . count($typeIds) . " items"
                 . ($priceProvider ? " via {$priceProvider}" : ''));
-            $this->pricing->updatePrices($market, $typeIds, $priceProvider);
+            $providerPrices = [];
+            if ($priceProvider) {
+                $providerPrices = $this->pricing->pricesFromProvider($market, $typeIds, $priceProvider);
+            } else {
+                $this->pricing->updatePrices($market, $typeIds);
+            }
 
             // Create appraisal items and calculate totals
-            $this->populateAppraisalItems($appraisal, $items);
+            $this->populateAppraisalItems($appraisal, $items, $providerPrices);
 
             Log::info("[Manager Core] Created appraisal {$appraisal->appraisal_id} with {$appraisal->items->count()} items");
 
@@ -191,13 +196,42 @@ class AppraisalService
     }
 
     /**
+     * The market's cached prices with a picked provider's answer laid over
+     * them, side by side. A side the provider gave no price for keeps the
+     * cached one, as it did when the provider stored its answer first.
+     *
+     * @param array $prices         [typeId => ['buy' => ?stats, 'sell' => ?stats]]
+     * @param array $providerPrices the same shape, from the picked provider
+     */
+    public static function layProviderPrices(array $prices, array $providerPrices): array
+    {
+        foreach ($providerPrices as $typeId => $answer) {
+            if (!is_array($answer)) {
+                continue;
+            }
+
+            foreach (['buy', 'sell'] as $side) {
+                if (is_array($answer[$side] ?? null)) {
+                    $cached = is_array($prices[$typeId] ?? null) ? $prices[$typeId] : ['buy' => null, 'sell' => null];
+                    $cached[$side] = $answer[$side];
+                    $prices[$typeId] = $cached;
+                }
+            }
+        }
+
+        return $prices;
+    }
+
+    /**
      * Populate appraisal with items and pricing data
      *
      * @param Appraisal $appraisal
      * @param array $items
+     * @param array $providerPrices What a provider picked for this appraisal
+     *                              answered, keyed by type id
      * @return void
      */
-    protected function populateAppraisalItems(Appraisal $appraisal, array $items)
+    protected function populateAppraisalItems(Appraisal $appraisal, array $items, array $providerPrices = [])
     {
         $totalBuy = 0;
         $totalSell = 0;
@@ -221,6 +255,8 @@ class AppraisalService
         if (count($typeIds) === 1) {
             $prices = [$typeIds[0] => $prices];
         }
+
+        $prices = self::layProviderPrices($prices, $providerPrices);
 
         // Jita fallback prep: when the configured market is a regional or
         // citadel market (e.g. a nullsec local hub) and an item has no orders

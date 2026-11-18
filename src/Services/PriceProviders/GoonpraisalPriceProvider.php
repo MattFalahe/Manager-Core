@@ -264,6 +264,17 @@ class GoonpraisalPriceProvider implements PriceProviderInterface
         return $system !== '' && in_array($system, self::SUPPORTED_SLUGS, true) ? $system : null;
     }
 
+    /**
+     * Goonpraisal's markets, as the Markets form offers them: the citadel
+     * ones are named after their system, in uppercase.
+     *
+     * @return string[]
+     */
+    public static function slugs(): array
+    {
+        return self::SUPPORTED_SLUGS;
+    }
+
     protected function pause(int $microseconds): void
     {
         usleep($microseconds);

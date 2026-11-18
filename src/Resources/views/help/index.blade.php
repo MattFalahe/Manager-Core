@@ -29,6 +29,16 @@
         min-width: 0;
     }
 
+    /* A search shows every section that matches, whichever one is open, and
+       leaves .active alone so clearing it goes back to the open section. */
+    .help-content.help-searching .help-section {
+        display: none;
+    }
+
+    .help-content.help-searching .help-section.search-match {
+        display: block;
+    }
+
     /* "What's New in v1" under the creator note: the picture of the whole
        major version, in the green box every plugin in the suite uses. */
     .whats-new-box {
@@ -100,6 +110,17 @@
     .recent-changes-box a {
         color: #a5b4fc !important;
         text-decoration: underline;
+    }
+    /* Earlier releases of the major, folded under the latest one. */
+    .recent-changes-box details {
+        margin-top: 18px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(139, 156, 247, 0.25);
+    }
+    .recent-changes-box summary {
+        color: #8b9cf7 !important;
+        font-weight: 600;
+        cursor: pointer;
     }
 
     /* The What's New pill carries the major version's name, the Recent
@@ -570,6 +591,10 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         <span class="recent-changes-tag">{{ trans('manager-core::help.recent_changes_name') }}</span>
                     </h4>
                     {!! trans('manager-core::help.recent_changes_body') !!}
+                    <details>
+                        <summary>{{ trans('manager-core::help.recent_changes_earlier_summary') }}</summary>
+                        {!! trans('manager-core::help.recent_changes_earlier_body') !!}
+                    </details>
                 </div>
 
                 {{-- What is Manager Core? --}}
@@ -682,14 +707,15 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                      absent and see what the rest of the suite loses. Pure
                      vanilla JS + SVG, self-contained, enhancement-only. --}}
                 <div class="help-card">
-                    <h3><i class="fas fa-project-diagram"></i> Interactive map &mdash; what would I lose without &hellip;?</h3>
+                    <h3><i class="fas fa-project-diagram"></i> Interactive map &mdash; what would I lose without &hellip;? {!! $newBadge !!}</h3>
                     @include('manager-core::partials._ecosystem_map')
                 </div>
 
                 {{-- The plugins that use Manager Core, each found the way the
-                     Plugin Bridge finds it: by its service provider class. --}}
+                     Plugin Bridge finds it: by its service provider class, and
+                     listed as the Plugin Bridge lists them. --}}
                 @php
-                    $familyPlugins = config('manager-core.bridge.compatible_plugins', []);
+                    $familyPlugins = \ManagerCore\Services\PluginBridge::suitePlugins();
                     $familyAbout = [
                         'mining-manager' => [
                             'url' => 'https://github.com/MattFalahe/Mining-Manager',
@@ -727,11 +753,16 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                             'here' => 'Prices its appraisals through Manager Core and publishes its buyback events.',
                             'unreleased' => true,
                         ],
+                        'market-manager' => [
+                            'url' => null,
+                            'text' => 'Price watches with targets, trend charts and deal alerts for every member.',
+                            'here' => 'It is built on Manager Core and doesn\'t work without it. Every price it shows comes from Manager Core\'s markets, through the market\'s own provider or one it names, and it is the one plugin that may ask for newer prices between the scheduled refreshes.',
+                        ],
                     ];
                 @endphp
                 <div class="help-card">
-                    <h3><i class="fas fa-th-large"></i> The plugins {!! $newBadge !!}</h3>
-                    <p>Every plugin below works on its own. Each says whether this server has it, checked when this page opens, and what it gets from Manager Core.</p>
+                    <h3><i class="fas fa-th-large"></i> The plugins</h3>
+                    <p>Every plugin below works on its own unless it says otherwise. Each says whether this server has it, checked when this page opens, and what it gets from Manager Core.</p>
                     @foreach($familyPlugins as $key => $plugin)
                         @php
                             $about = $familyAbout[$key] ?? null;
@@ -753,7 +784,9 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                             @if($about)
                                 <p>{{ $about['text'] }}</p>
                                 <p><strong>From Manager Core:</strong> {{ $about['here'] }}</p>
-                                <a href="{{ $about['url'] }}" target="_blank" rel="noopener" class="eco-link"><i class="fab fa-github"></i> {{ $plugin['name'] ?? $key }} on GitHub</a>
+                                @if(!empty($about['url']))
+                                    <a href="{{ $about['url'] }}" target="_blank" rel="noopener" class="eco-link"><i class="fab fa-github"></i> {{ $plugin['name'] ?? $key }} on GitHub</a>
+                                @endif
                             @endif
                         </div>
                     @endforeach
@@ -844,13 +877,19 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     {!! trans('manager-core::help.custom_markets_health_table') !!}
                     {!! trans('manager-core::help.custom_markets_pagination_note') !!}
 
-                    <h5 style="margin-top:18px;">{{ trans('manager-core::help.pricing_fallback_title') }} {!! $newBadge !!}</h5>
+                    <h5 style="margin-top:18px;">{{ trans('manager-core::help.pricing_fallback_title') }}</h5>
                     {!! trans('manager-core::help.pricing_fallback_body') !!}
+
+                    <h5 style="margin-top:18px;">{{ trans('manager-core::help.pricing_variants_title') }} {!! $newBadge !!}</h5>
+                    {!! trans('manager-core::help.pricing_variants_body') !!}
 
                     <h5 style="margin-top:18px;">{{ trans('manager-core::help.custom_markets_consume_title') }}</h5>
                     {!! trans('manager-core::help.custom_markets_consume_intro') !!}
                     {!! trans('manager-core::help.custom_markets_consume_steps') !!}
                     {!! trans('manager-core::help.custom_markets_consume_edge_cases') !!}
+
+                    <h5 style="margin-top:18px;">{{ trans('manager-core::help.pricing_provider_override_title') }} {!! $newBadge !!}</h5>
+                    {!! trans('manager-core::help.pricing_provider_override_html') !!}
                 </div>
             </div>
 
@@ -905,7 +944,7 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         <li>{{ trans('manager-core::help.plugin_buyback') }}</li>
                     </ul>
 
-                    <h4>{{ trans('manager-core::help.compatible_plugins_title') }} {!! $newBadge !!}</h4>
+                    <h4>{{ trans('manager-core::help.compatible_plugins_title') }}</h4>
                     <p>{!! trans('manager-core::help.compatible_plugins_desc') !!}</p>
                 </div>
             </div>
@@ -1045,10 +1084,10 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <h4>{{ trans('manager-core::help.fast_poll_how_title') }}</h4>
                     {!! trans('manager-core::help.fast_poll_how_body') !!}
 
-                    <h4 style="margin-top:18px;">{{ trans('manager-core::help.fast_poll_ages_title') }} {!! $newBadge !!}</h4>
+                    <h4 style="margin-top:18px;">{{ trans('manager-core::help.fast_poll_ages_title') }}</h4>
                     {!! trans('manager-core::help.fast_poll_ages_body') !!}
 
-                    <h4 style="margin-top:18px;">{{ trans('manager-core::help.fast_poll_pool_title') }} {!! $newBadge !!}</h4>
+                    <h4 style="margin-top:18px;">{{ trans('manager-core::help.fast_poll_pool_title') }}</h4>
                     {!! trans('manager-core::help.fast_poll_pool_body') !!}
 
                     <h4 style="margin-top:18px;">{{ trans('manager-core::help.fast_poll_scale_title') }}</h4>
@@ -1126,7 +1165,7 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <h4>{{ trans('manager-core::help.watchdog_checks_title') }}</h4>
                     {!! trans('manager-core::help.watchdog_checks_body') !!}
 
-                    <h4>{{ trans('manager-core::help.watchdog_dedup_title') }} {!! $newBadge !!}</h4>
+                    <h4>{{ trans('manager-core::help.watchdog_dedup_title') }}</h4>
                     <p>{!! trans('manager-core::help.watchdog_dedup_body') !!}</p>
 
                     <h4>{{ trans('manager-core::help.watchdog_exclusion_title') }}</h4>
@@ -1351,6 +1390,11 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
             $('.help-section').removeClass('active');
             $('#' + section).addClass('active');
 
+            // Picking a section ends a search.
+            $('#helpSearch').val('');
+            $('.help-content').removeClass('help-searching');
+            $('.help-section').removeClass('search-match');
+
             // Update URL hash without scrolling
             history.replaceState(null, '', '#' + section);
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1361,28 +1405,21 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
             $(this).closest('.faq-item').toggleClass('open');
         });
 
-        // Search filter (matches against full section text, not single section)
+        // Every section is searched, not only the open one. Classes only:
+        // inline display styles would outlive the search and keep the nav
+        // from showing a section afterwards.
         $('#helpSearch').on('input', function() {
             const q = $(this).val().toLowerCase();
 
             if (q === '') {
-                // Restore: hide all, show currently-active in nav
-                const activeSection = $('.help-nav .nav-link.active').data('section') || 'overview';
-                $('.help-section').removeClass('active').hide();
-                $('#' + activeSection).addClass('active').show();
+                $('.help-content').removeClass('help-searching');
+                $('.help-section').removeClass('search-match');
                 return;
             }
 
-            // Show every section that contains the query
-            let matched = false;
+            $('.help-content').addClass('help-searching');
             $('.help-section').each(function() {
-                const $section = $(this);
-                if ($section.text().toLowerCase().includes(q)) {
-                    $section.show().addClass('active');
-                    matched = true;
-                } else {
-                    $section.hide().removeClass('active');
-                }
+                $(this).toggleClass('search-match', $(this).text().toLowerCase().includes(q));
             });
         });
 

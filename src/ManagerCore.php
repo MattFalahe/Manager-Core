@@ -22,9 +22,10 @@ class ManagerCore
      * Public version of Manager Core. Bump on each release.
      *
      * Plugins can compare against this constant to gate features that depend
-     * on a newer MC version. Keep in sync with composer.json.
+     * on a newer MC version. Keep it the same as the release tag: composer.json
+     * has no version, Packagist takes it from the tag.
      */
-    const VERSION = '1.1.0';
+    const VERSION = '1.2.0';
 
     /**
      * The major.minor channel — useful for "any 1.x" gating.

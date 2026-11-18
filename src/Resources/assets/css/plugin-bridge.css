@@ -232,6 +232,7 @@
 .plugin-node:nth-child(5) { bottom: 24%; left: 4%; }
 .plugin-node:nth-child(6) { bottom: 24%; right: 4%; }
 .plugin-node:nth-child(7) { bottom: 4%;  left: 50%; transform: translateX(-50%); }
+.plugin-node:nth-child(8) { top: 4%;     left: 50%; transform: translateX(-50%); }
 
 /* ---- Legend ---- */
 .bridge-legend {

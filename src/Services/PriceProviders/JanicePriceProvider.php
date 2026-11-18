@@ -71,12 +71,16 @@ class JanicePriceProvider implements PriceProviderInterface
     public const STATUS_KEY = 'pricing.janice_status';
 
     /**
-     * MC market → Janice market id. Anything not in this map falls back to
-     * Jita. Janice's market 1 is The Forge, Jita's whole region, not Amarr.
+     * MC market → Janice market id, from Janice's own list of pricer markets.
+     * Anything not in this map falls back to Jita. Janice's market 1 is The
+     * Forge, Jita's whole region, not Amarr.
      */
     private const MARKET_PARAMS = [
         'jita' => '2',
         'amarr' => '115',
+        'rens' => '116',
+        'dodixie' => '117',
+        'hek' => '118',
     ];
 
     protected ?string $apiKey;
@@ -222,6 +226,16 @@ class JanicePriceProvider implements PriceProviderInterface
     public static function tracksMarket(string $market): bool
     {
         return isset(self::MARKET_PARAMS[strtolower(trim($market))]);
+    }
+
+    /**
+     * The hubs Janice prices, by the market key the slug field takes.
+     *
+     * @return string[]
+     */
+    public static function hubs(): array
+    {
+        return array_keys(self::MARKET_PARAMS);
     }
 
     /**

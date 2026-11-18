@@ -50,31 +50,6 @@ class PricingController extends Controller
     }
 
     /**
-     * Show pricing for a specific type
-     *
-     * @param int $typeId
-     * @param Request $request
-     * @return \Illuminate\View\View
-     */
-    public function showType($typeId, Request $request)
-    {
-        // A5 fix: honor operator's pricing.default_market Setting before falling back to config.
-        $market = $request->input('market', \ManagerCore\Helpers\Settings::get('pricing.default_market', 'pricing.default_market', 'jita'));
-
-        $prices = $this->pricingService->getPrice($typeId, $market);
-        $trend = $this->pricingService->getTrend($typeId, $market, 7);
-
-        // Get type info from SDE
-        $type = \Seat\Eveapi\Models\Sde\InvType::find($typeId);
-
-        if (!$type) {
-            abort(404, 'Type not found');
-        }
-
-        return view('manager-core::pricing.type', compact('type', 'prices', 'trend', 'market'));
-    }
-
-    /**
      * Subscribe to type IDs for price tracking
      *
      * @param Request $request

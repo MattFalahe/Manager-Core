@@ -77,6 +77,14 @@ class MarketDataService
     protected const STRUCTURE_PAGE_RETRY_PAUSE_SECONDS = 2;
 
     /**
+     * The prices a fetch that stores nothing worked out, by type, in the
+     * shape a provider answers with. Null while a fetch stores what it reads.
+     *
+     * @var array<int, array{buy: ?array, sell: ?array}>|null
+     */
+    protected ?array $collected = null;
+
+    /**
      * Constructor
      */
     public function __construct()
@@ -122,6 +130,11 @@ class MarketDataService
 
         $marketType = $marketConfig['market_type'] ?? \ManagerCore\Models\Market::TYPE_HUB;
         if ($marketType === \ManagerCore\Models\Market::TYPE_CITADEL) {
+            if ($this->collected !== null) {
+                $this->recordFetchFailure($typeIds, "MCPraisal reads a structure's market only for a market set to MCPraisal.", false);
+                return;
+            }
+
             $this->updateStructureMarketPrices($typeIds, $market, $marketConfig);
             return;
         }
@@ -134,8 +147,10 @@ class MarketDataService
         // an hour see the same subscribed types and re-fetching unchanged
         // prices wastes ESI budget. The configured TTL is operator-tunable
         // via Setting('pricing.hub_ttl_seconds') with a 30-minute default
-        // that aligns with CCP's market-cache TTL.
-        $hubTtlSeconds = (int) \ManagerCore\Helpers\Settings::get(
+        // that aligns with CCP's market-cache TTL. A fetch that stores
+        // nothing skips none: the stored rows are the market's own, and may
+        // be another provider's.
+        $hubTtlSeconds = $this->collected !== null ? 0 : (int) \ManagerCore\Helpers\Settings::get(
             'pricing.hub_ttl_seconds',
             'pricing.hub_ttl_seconds',
             1800  // 30 min default
@@ -157,6 +172,7 @@ class MarketDataService
 
         $updatedCount = 0;
         $totalTypes = count($typeIds);
+        $stores = $this->collected === null;
 
         // Process types in batches for concurrent requests.
         //
@@ -292,7 +308,8 @@ class MarketDataService
 
                 // Log progress after each batch
                 $processedSoFar = min(($batchIndex + 1) * $batchSize, $totalTypes);
-                Log::info("[Manager Core] Processed {$processedSoFar}/{$totalTypes} types, updated {$updatedCount} with prices");
+                Log::info("[Manager Core] Processed {$processedSoFar}/{$totalTypes} types, "
+                    . ($stores ? "updated {$updatedCount} with prices" : "priced {$updatedCount} without storing them"));
 
                 // Small delay between batches to respect rate limits and prevent overwhelming the server
                 if ($batchIndex < count($batches) - 1) {
@@ -306,7 +323,41 @@ class MarketDataService
             }
         }
 
-        Log::info("[Manager Core] Completed: Updated prices for {$updatedCount}/{$totalTypes} types in {$market}");
+        Log::info($stores
+            ? "[Manager Core] Completed: Updated prices for {$updatedCount}/{$totalTypes} types in {$market}"
+            : "[Manager Core] Completed: priced {$updatedCount}/{$totalTypes} types in {$market} without storing them");
+    }
+
+    /**
+     * A hub's prices worked out from ESI's order book without storing them
+     * or the day's history, for a plugin that asked for MCPraisal's price at
+     * a market another provider prices. Failures are reported as a stored
+     * fetch reports them.
+     *
+     * A structure is read only for a market set to MCPraisal, and what it
+     * reads there is that market's own price, so a structure market is
+     * refused here.
+     *
+     * @return array<int, array{buy: ?array, sell: ?array}> keyed by type, only the types priced
+     */
+    public function collectMarketPrices(array $typeIds, string $market): array
+    {
+        $this->collected = [];
+
+        try {
+            $this->updateMarketPrices($typeIds, $market);
+
+            return $this->collected;
+        } finally {
+            $this->collected = null;
+        }
+    }
+
+    public function isStructureMarket(string $market): bool
+    {
+        $config = Market::getMarketConfig($market);
+
+        return ($config['market_type'] ?? Market::TYPE_HUB) === Market::TYPE_CITADEL;
     }
 
     /**
@@ -843,7 +894,8 @@ class MarketDataService
     }
 
     /**
-     * Calculate price statistics from orders and save to database
+     * Calculate price statistics from orders and save them, or keep them
+     * for the caller when the fetch stores nothing (collectMarketPrices)
      *
      * Based on go-evepraisal's getPriceAggregatesForOrders
      *
@@ -867,13 +919,28 @@ class MarketDataService
 
         // Each side's percentile sits near its best price, as go-evepraisal's
         // does: the top of the buy orders, the bottom of the sell orders.
-        if (!empty($buyOrders)) {
-            $buyStats = $this->calculatePriceStats($buyOrders, (float) config('manager-core.pricing.percentiles.buy', 0.99));
+        $buyStats = !empty($buyOrders)
+            ? $this->calculatePriceStats($buyOrders, (float) config('manager-core.pricing.percentiles.buy', 0.99))
+            : null;
+        $sellStats = !empty($sellOrders)
+            ? $this->calculatePriceStats($sellOrders, (float) config('manager-core.pricing.percentiles.sell', 0.01))
+            : null;
+
+        if ($this->collected !== null) {
+            $stamp = ['strategy' => 'orders', 'updated_at' => now()->toIso8601String()];
+            $this->collected[(int) $typeId] = [
+                'buy' => $buyStats !== null ? $buyStats + $stamp : null,
+                'sell' => $sellStats !== null ? $sellStats + $stamp : null,
+            ];
+
+            return;
+        }
+
+        if ($buyStats !== null) {
             $this->savePriceStats($typeId, $market, 'buy', $buyStats);
         }
 
-        if (!empty($sellOrders)) {
-            $sellStats = $this->calculatePriceStats($sellOrders, (float) config('manager-core.pricing.percentiles.sell', 0.01));
+        if ($sellStats !== null) {
             $this->savePriceStats($typeId, $market, 'sell', $sellStats);
         }
 

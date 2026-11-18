@@ -43,6 +43,29 @@ return [
         // Update frequency in minutes (default: 240 = 4 hours)
         'update_frequency' => env('MANAGER_CORE_PRICE_UPDATE_FREQUENCY', 240),
 
+        // Fetching between the scheduled refreshes, at a plugin's request
+        // (pricing.refreshIfOlder). The scheduled refresh is right for a
+        // plugin that prices an invoice or an appraisal, so only a plugin
+        // whose users watch a price move is listed.
+        'refresh_on_request' => [
+            'plugins' => ['market-manager'],
+
+            // The youngest a stored price may be, by the provider that
+            // priced it, before an ask fetches it again, whatever age the
+            // plugin asks with, less PricingService::REQUEST_TOLERANCE_SECONDS.
+            // A price through a provider a plugin named waits as long between
+            // scheduled fetches too. Janice's is the longest: one key serves
+            // every plugin, and its owner blocks keys for heavy traffic.
+            // 15 minutes at the least.
+            'min_age_seconds' => [
+                'esi' => 1800,
+                'fuzzwork' => 1800,
+                'goonpraisal' => 1800,
+                'janice' => 3600,
+            ],
+            'default_min_age_seconds' => 3600,
+        ],
+
         // Default market/region for pricing
         'default_market' => env('MANAGER_CORE_DEFAULT_MARKET', 'jita'),
 
@@ -86,6 +109,13 @@ return [
 
         // Price history retention in days
         'history_retention_days' => 90,
+
+        // Prices a plugin asked for through a provider it named. Once no
+        // plugin subscribes to one, the daily cleanup deletes it after this
+        // many days without a fetch.
+        'variants' => [
+            'unsubscribed_retention_days' => 7,
+        ],
 
     ],
 
@@ -175,6 +205,17 @@ return [
                 'package' => 'mattfalahe/buyback-manager',
                 'icon' => 'fa-shopping-cart',
                 'subscription_name' => 'buyback-manager',
+            ],
+            // Listed only where it is installed (PluginBridge::suitePlugins()):
+            // no map node or Offline row on an install without it. Keep it
+            // last, so leaving it out moves no other node on the map.
+            'market-manager' => [
+                'name' => 'Market Manager',
+                'class' => 'MarketManager\MarketManagerServiceProvider',
+                'package' => 'mattfalahe/market-manager',
+                'icon' => 'fa-chart-line',
+                'subscription_name' => 'market-manager',
+                'only_when_installed' => true,
             ],
         ],
 
@@ -338,6 +379,7 @@ return [
             // fired. Fixed 2026-06-08.
             'corp-wallet-manager' => ['wallet.', 'member.'],
             'buyback-manager' => ['buyback.'],
+            'market-manager' => ['market.'],
             'blueprint-manager' => ['blueprint.'],
             'hr-manager' => ['hr.'],
             'seat-discord-pings' => ['pings.'],

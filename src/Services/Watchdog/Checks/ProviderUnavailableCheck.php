@@ -7,12 +7,14 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use ManagerCore\Models\Market;
 use ManagerCore\Models\PricingPreference;
+use ManagerCore\Models\VariantSubscription;
 use ManagerCore\Services\PriceProviders\JanicePriceProvider;
 use ManagerCore\Services\Watchdog\WatchdogCheck;
 
 /**
- * Alert when any price provider in use on an ENABLED market, or as a
- * plugin's provider override, reports `isAvailable() === false`, when
+ * Alert when any price provider in use on an ENABLED market, as a plugin's
+ * provider override, or named by a plugin for prices at a market, reports
+ * `isAvailable() === false`, when
  * Janice turned its last request away, or when an enabled market's own
  * provider failed its last refresh outright.
  *
@@ -48,7 +50,7 @@ class ProviderUnavailableCheck implements WatchdogCheck
     public function label(): string { return 'Price provider unavailable'; }
     public function description(): string
     {
-        return 'Alerts when a price provider routing an enabled market, or set as a plugin\'s provider override, reports isAvailable=false, when Janice refused its last request or failed it outright, or when an enabled market\'s provider failed its last refresh outright. Typically a missing or refused credential (Janice API key, SeAT prices-core sub-provider), a provider that is down, or a structure no Key Pool director can read.';
+        return 'Alerts when a price provider routing an enabled market, set as a plugin\'s provider override, or named by a plugin for its prices at a market, reports isAvailable=false, when Janice refused its last request or failed it outright, or when an enabled market\'s provider failed its last refresh outright. Typically a missing or refused credential (Janice API key, SeAT prices-core sub-provider), a provider that is down, or a structure no Key Pool director can read.';
     }
 
     public function run(): ?array
@@ -73,7 +75,7 @@ class ProviderUnavailableCheck implements WatchdogCheck
                 ->pluck('provider_override')
                 ->all();
 
-            $inUseProviders = array_values(array_unique(array_merge($marketProviders, $overrideProviders)));
+            $inUseProviders = array_values(array_unique(array_merge($marketProviders, $overrideProviders, $this->variantProviders())));
 
             if (empty($inUseProviders)) {
                 return null;
@@ -207,6 +209,22 @@ class ProviderUnavailableCheck implements WatchdogCheck
             ],
             'dedup_keys' => $dedupKeys,
         ];
+    }
+
+    /**
+     * Providers a plugin named for prices at some market. A plugin can ask
+     * for Janice's price at Jita with no market or override on Janice.
+     *
+     * @return string[]
+     */
+    protected function variantProviders(): array
+    {
+        try {
+            return VariantSubscription::query()->distinct()->pluck('provider')->map(fn ($p) => (string) $p)->all();
+        } catch (\Throwable $e) {
+            // Before the migration has run.
+            return [];
+        }
     }
 
     /**

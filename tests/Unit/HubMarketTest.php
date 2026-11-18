@@ -33,10 +33,20 @@ class HubMarketTest extends TestCase
         $this->assertTrue(JanicePriceProvider::tracksMarket('Amarr'));
     }
 
+    /** Janice's list of pricer markets, read 15 November: 116 Rens, 117 Dodixie, 118 Hek. */
+    public function test_janice_is_asked_for_each_of_the_other_hubs(): void
+    {
+        $this->assertSame('116', self::janice('rens'));
+        $this->assertSame('117', self::janice('dodixie'));
+        $this->assertSame('118', self::janice('hek'));
+        $this->assertTrue(JanicePriceProvider::tracksMarket('Dodixie '));
+    }
+
     public function test_janice_prices_a_market_it_has_no_id_for_at_jita(): void
     {
-        $this->assertSame('2', self::janice('dodixie'));
-        $this->assertFalse(JanicePriceProvider::tracksMarket('dodixie'));
+        $this->assertSame('2', self::janice('insmother-c-j6mt'));
+        $this->assertFalse(JanicePriceProvider::tracksMarket('insmother-c-j6mt'));
+        $this->assertFalse(JanicePriceProvider::tracksMarket(''));
     }
 
     /**

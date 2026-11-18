@@ -74,7 +74,7 @@ class AppraisalController extends Controller
         // badge AND the citadel-only-with-goonpraisal market filter:
         //   - $marketTypes: { key => 'hub' | 'citadel' | 'structure' | 'region' }
         //   - providers[X][supports]: 'hubs' | 'hubs_and_citadels' |
-        //     'hubs_regions_structures' | 'jita_amarr'
+        //     'hubs_regions_structures'
         // The blade serialises these into JS — provider-change re-renders
         // the market dropdown showing only compatible markets, and
         // market-change snaps provider to a compatible one if the current
@@ -106,10 +106,8 @@ class AppraisalController extends Controller
      *                            order book, and citadel markets read
      *                            straight from the structure by ID
      *   - 'hubs'              : tracks only the five main trade hubs
-     *                            (Jita/Amarr/Dodixie/Hek/Rens) — Fuzzwork
-     *                            and SeAT-chained sub-providers
-     *   - 'jita_amarr'        : Janice — currently only Jita + Amarr;
-     *                            other hubs silently fall back to Jita
+     *                            (Jita/Amarr/Dodixie/Hek/Rens): Fuzzwork,
+     *                            Janice and SeAT-chained sub-providers
      *
      * Availability mirrors each provider's own isAvailable() contract:
      * Janice needs an API key, SeAT needs prices-core installed,
@@ -133,7 +131,7 @@ class AppraisalController extends Controller
             'janice' => [
                 'label' => 'Janice',
                 'available' => false,
-                'supports' => 'jita_amarr',
+                'supports' => 'hubs',
                 'note' => 'Appraisal service; needs API key in Settings',
             ],
             'goonpraisal' => [

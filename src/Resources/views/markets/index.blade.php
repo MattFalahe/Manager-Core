@@ -5,26 +5,7 @@
 
 @push('head')
 <link rel="stylesheet" href="{{ asset('vendor/manager-core/css/manager-core.css') }}?v=3">
-<style>
-    .mk-table { width: 100%; }
-    .mk-table th { background: #2a2f3a; color: #c2c7d0; font-weight: 600; padding: 0.6rem 0.8rem; }
-    .mk-table td { padding: 0.6rem 0.8rem; vertical-align: middle; border-top: 1px solid #2a3038; }
-    .mk-key   { font-family: monospace; color: #dfe3eb; }
-    .mk-meta  { color: #9aa3b3; font-size: 0.82rem; }
-    .mk-label-citadel { background: #4b3b73; color: #e4dafa; padding: 0.15rem 0.5rem; border-radius: 0.2rem; font-size: 0.72rem; font-weight: 700; }
-    .mk-label-hub     { background: #1c4f6f; color: #d4ecfa; padding: 0.15rem 0.5rem; border-radius: 0.2rem; font-size: 0.72rem; font-weight: 700; }
-    .mk-status-ok                   { color: #5acf85; }
-    .mk-status-warn                 { color: #e0bd4f; }
-    .mk-status-err                  { color: #e36b6b; }
-    .mk-actions form { display: inline-block; margin: 0; }
-    .mk-actions .btn { margin-right: 0.25rem; }
-
-    /* (Removed v1.0.0 release prep)
-       .mk-fallback-warn and .mk-promo-log were styles for the
-       director-pool fallback indicator that lived on citadel rows
-       pre-pivot. The markup that used them was deleted in the
-       Third-Party Provider Pivot; the CSS lingered as dead bytes. */
-</style>
+@include('manager-core::markets.partials.styles')
 @endpush
 
 @section('full')
@@ -51,8 +32,40 @@
         </div>
     @endif
 
-    {{-- Hub markets — canonical, mostly read-only --}}
+    {{-- Providers: what each covers and whether it is set up, once, so the
+         rows below only need to say what each can do at their place. --}}
     <div class="card card-dark">
+        <div class="card-header">
+            <h3 class="card-title">
+                <i class="fas fa-plug"></i> Price Providers
+            </h3>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                Every market has one provider of its own, which plugins read unless they name another.
+                A plugin can also ask for another provider's prices at a market, wherever that provider prices the place.
+            </p>
+            <div class="mk-tiles">
+                @foreach($tiles as $provider => $tile)
+                    <div class="mk-tile">
+                        <div class="mk-tile-name">{{ $tile['label'] }}</div>
+                        <div class="mk-tile-covers">{{ $tile['covers'] }}</div>
+                        @if($tile['link'])
+                            <a href="{{ $tile['link'] }}" class="mk-chip mk-chip-{{ $tile['state'] }}">{{ $tile['status'] }}</a>
+                        @else
+                            <span class="mk-chip mk-chip-{{ $tile['state'] }}">{{ $tile['status'] }}</span>
+                        @endif
+                        <div class="mk-meta mt-1">
+                            Own provider of {{ $tile['markets'] }} enabled {{ $tile['markets'] === 1 ? 'market' : 'markets' }}
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    </div>
+
+    {{-- Hub markets: every provider's chip on every row --}}
+    <div class="card card-dark mt-4">
         <div class="card-header">
             <h3 class="card-title">
                 <i class="fas fa-globe"></i> Canonical Hub Markets
@@ -60,86 +73,55 @@
         </div>
         <div class="card-body">
             <p class="text-muted">
-                The five EVE hub markets seeded at install. Used by default for plugin pricing.
-                These cannot be edited but can be disabled if your install has no use for them.
+                The five EVE trade hubs, seeded at install and used by default for plugin pricing. They can't be edited,
+                but you can disable one your install has no use for. A region's market you add yourself is listed here too.
+                Each row shows what every provider can do there.
             </p>
+            <div class="mk-legend mb-2">
+                <span class="mk-chip mk-chip-own"><i class="fas fa-star"></i> Own provider</span>
+                <span class="mk-chip mk-chip-ok">Prices it</span>
+                <span class="mk-chip mk-chip-setup">Prices it once set up</span>
+                <span class="mk-chip mk-chip-no">Can't price it</span>
+                <span class="ml-1">A number counts the plugins reading the market through that provider. Hover a provider for more.</span>
+            </div>
 
-            <table class="mk-table">
-                <thead>
-                    <tr>
-                        <th>Market</th>
-                        <th>Region / System</th>
-                        <th>Last refresh</th>
-                        <th>Used by</th>
-                        <th>Enabled</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach($hubs as $market)
+            <div class="table-responsive">
+                <table class="mk-table">
+                    <thead>
                         <tr>
-                            <td>
-                                <strong>{{ $market->name }}</strong>
-                                <span class="mk-label-hub">HUB</span>
-                                <br>
-                                <span class="mk-key">{{ $market->key }}</span>
-                            </td>
-                            <td>
-                                <span class="mk-meta">region #{{ $market->region_id }}</span>
-                                @if(!empty($market->system_ids))
-                                    <br><span class="mk-meta">system #{{ implode(', #', $market->system_ids) }}</span>
-                                @endif
-                            </td>
-                            <td>
-                                @if($market->last_refresh_at)
-                                    {{ $market->last_refresh_at->diffForHumans() }}
-                                    <br>
-                                    @if($market->last_refresh_status === \ManagerCore\Models\Market::STATUS_OK)
-                                        <span class="mk-status-ok"><i class="fas fa-check-circle"></i> OK</span>
-                                    @else
-                                        <span class="mk-status-err"
-                                              data-toggle="tooltip"
-                                              title="{{ $market->last_refresh_error }}">
-                                            <i class="fas fa-exclamation-circle"></i> {{ $market->last_refresh_status }}
-                                        </span>
-                                    @endif
-                                @else
-                                    <span class="mk-meta">never</span>
-                                @endif
-                            </td>
-                            <td>
-                                @php $count = (int) ($pluginPreferences[$market->key] ?? 0); @endphp
-                                @if($count > 0)
-                                    <strong>{{ $count }} plugin(s)</strong>
-                                @else
-                                    <span class="mk-meta">0</span>
-                                @endif
-                            </td>
-                            <td>
-                                <form method="POST" action="{{ route('manager-core.markets.toggle', $market->id) }}" style="display:inline;">
-                                    @csrf
-                                    <button type="submit" class="btn btn-sm {{ $market->is_enabled ? 'btn-success' : 'btn-secondary' }}">
-                                        {{ $market->is_enabled ? 'Enabled' : 'Disabled' }}
-                                    </button>
-                                </form>
-                            </td>
-                            <td class="mk-actions">
-                                <form method="POST" action="{{ route('manager-core.markets.test', $market->id) }}" style="display:inline;">
-                                    @csrf
-                                    <button type="submit" class="btn btn-sm btn-outline-info" title="Run a real fetch right now and report success/failure">
-                                        <i class="fas fa-vial"></i> Test fetch
-                                    </button>
-                                </form>
-                            </td>
+                            <th>Market</th>
+                            <th>Place</th>
+                            <th>Providers</th>
+                            <th>Last refresh</th>
+                            <th>Used by</th>
+                            <th>Enabled</th>
+                            <th>Actions</th>
                         </tr>
-                    @endforeach
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        @foreach($hubs as $market)
+                            <tr class="{{ $market->is_enabled ? '' : 'mk-off' }}">
+                                <td>
+                                    <strong>{{ $market->name }}</strong>
+                                    <br>
+                                    <span class="mk-key">{{ $market->key }}</span>
+                                </td>
+                                <td class="mk-dim">
+                                    <span class="mk-meta">{{ $where[$market->key] ?? '' }}</span>
+                                </td>
+                                <td class="mk-dim">
+                                    @include('manager-core::markets.partials.chips', ['chips' => $chips[$market->key] ?? []])
+                                </td>
+                                @include('manager-core::markets.partials.row-cells')
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
-    {{-- Citadel markets: the seven pre-seeded Goonpraisal-backed entries,
-         plus any structure the operator adds to be read through ESI. --}}
+    {{-- Citadel markets, grouped by the provider that prices them --}}
     <div class="card card-dark mt-4">
         <div class="card-header">
             <h3 class="card-title">
@@ -153,28 +135,18 @@
         </div>
         <div class="card-body">
             <p class="text-muted">
-                Seven pre-seeded nullsec markets backed by
-                <a href="https://appraise.gnf.lt" target="_blank" rel="noopener">Goonpraisal</a>, all disabled
-                by default, plus any structure you add with <em>Add Market</em> to be read straight from
-                ESI. Enable the rows your alliance trades at, click <em>Test</em> to check the market can be
-                read, then point consumer plugins at it via
+                Grouped by the provider that prices them. Enable the rows your alliance trades at, click <em>Test</em> to
+                check the market can be read, then point plugins at it on
                 <a href="{{ route('manager-core.pricing-preferences.index') }}">Pricing Preferences</a>.
+                <em>Add Market</em> finds a structure by its name.
             </p>
 
-            @if($citadels->isEmpty())
-                <div class="alert alert-info">
-                    <i class="fas fa-info-circle"></i>
-                    No citadel markets seeded. This is unusual — try running
-                    <code>php artisan migrate:refresh</code> on the
-                    <code>2026_01_01_000009_create_manager_core_markets_table</code> migration.
-                </div>
-            @else
+            <div class="table-responsive">
                 <table class="mk-table">
                     <thead>
                         <tr>
                             <th>Market</th>
-                            <th>Location</th>
-                            <th>Provider</th>
+                            <th>Place</th>
                             <th>Last refresh</th>
                             <th>Used by</th>
                             <th>Enabled</th>
@@ -182,153 +154,95 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($citadels as $market)
-                            <tr>
-                                <td>
-                                    <strong>{{ $market->name }}</strong>
-                                    <span class="mk-label-citadel">CITADEL</span>
-                                    <br>
-                                    <span class="mk-key">{{ $market->key }}</span>
-                                </td>
-                                <td>
-                                    @if($market->system_name)
-                                        <strong>{{ $market->system_name }}</strong>
-                                        <br>
-                                    @endif
-                                    @if($market->structure_name)
-                                        <span class="mk-meta">{{ $market->structure_name }}</span>
-                                        <br>
-                                    @endif
-                                    @if($market->region_id)
-                                        <span class="mk-meta">region #{{ $market->region_id }}</span>
-                                    @endif
-                                </td>
-                                <td>
-                                    @php
-                                        $providerLabel = match($market->provider) {
-                                            'esi'         => 'MCPraisal (ESI)',
-                                            'janice'      => 'Janice',
-                                            'fuzzwork'    => 'Fuzzwork',
-                                            'goonpraisal' => 'Goonpraisal',
-                                            'seat'        => 'SeAT Provider',
-                                            default       => $market->provider ?? '(none)',
-                                        };
-                                    @endphp
-                                    <strong>{{ $providerLabel }}</strong>
-                                    @if($market->provider_slug)
-                                        <br>
-                                        <span class="mk-meta">slug: <code>{{ $market->provider_slug }}</code></span>
-                                    @endif
-                                </td>
-                                <td>
-                                    @if($market->last_refresh_at)
-                                        {{ $market->last_refresh_at->diffForHumans() }}
-                                        <br>
-                                        @if($market->last_refresh_status === \ManagerCore\Models\Market::STATUS_OK)
-                                            <span class="mk-status-ok"><i class="fas fa-check-circle"></i> OK</span>
-                                        @else
-                                            <span class="mk-status-err"
-                                                  data-toggle="tooltip"
-                                                  title="{{ $market->last_refresh_error }}">
-                                                <i class="fas fa-times-circle"></i> {{ $market->last_refresh_status ?? 'error' }}
-                                            </span>
+                        @foreach($citadelGroups as $provider => $group)
+                            <tr class="mk-group">
+                                <td colspan="6">
+                                    <span class="mk-group-name">{{ $group['label'] }}</span>
+                                    <span class="mk-meta">
+                                        {{ $group['markets']->count() }} {{ $group['markets']->count() === 1 ? 'market' : 'markets' }}, {{ $group['enabled'] }} enabled
+                                    </span>
+                                    <div class="mk-meta">
+                                        {{ $group['intro'] }}
+                                        @if($provider === 'esi')
+                                            <a href="{{ route('manager-core.esi-key-pool.index') }}">{{ $keyPool === null ? 'Open the ESI Key Pool' : $tiles['esi']['status'] }}</a>
                                         @endif
-                                    @else
-                                        <span class="mk-meta">never</span>
-                                    @endif
-                                </td>
-                                <td>
-                                    @php $count = (int) ($pluginPreferences[$market->key] ?? 0); @endphp
-                                    @if($count > 0)
-                                        <strong>{{ $count }} plugin(s)</strong>
-                                    @else
-                                        <span class="mk-meta">0</span>
-                                    @endif
-                                </td>
-                                <td>
-                                    <form method="POST" action="{{ route('manager-core.markets.toggle', $market->id) }}" style="display:inline;">
-                                        @csrf
-                                        <button type="submit" class="btn btn-sm {{ $market->is_enabled ? 'btn-success' : 'btn-secondary' }}">
-                                            {{ $market->is_enabled ? 'Enabled' : 'Disabled' }}
-                                        </button>
-                                    </form>
-                                </td>
-                                <td class="mk-actions">
-                                    <form method="POST" action="{{ route('manager-core.markets.test', $market->id) }}" style="display:inline;">
-                                        @csrf
-                                        <button type="submit" class="btn btn-sm btn-outline-info" title="Run a real fetch right now and report success/failure">
-                                            <i class="fas fa-vial"></i> Test
-                                        </button>
-                                    </form>
-                                    {{-- The seven pre-seeded rows stay fixed
-                                         Goonpraisal targets: a changed slug
-                                         that Goonpraisal doesn't track would
-                                         quietly fall back to Jita. Markets the
-                                         operator added can be edited. --}}
-                                    @if($market->is_custom)
-                                        <a href="{{ route('manager-core.markets.edit', $market->id) }}" class="btn btn-sm btn-outline-secondary">
-                                            <i class="fas fa-edit"></i> Edit
-                                        </a>
-                                        <form method="POST" action="{{ route('manager-core.markets.destroy', $market->id) }}" style="display:inline;"
-                                              onsubmit="return confirm('Delete this market?');">
-                                            @csrf
-                                            @method('DELETE')
-                                            <button type="submit" class="btn btn-sm btn-outline-danger">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </form>
-                                    @endif
+                                    </div>
                                 </td>
                             </tr>
+                            @forelse($group['markets'] as $market)
+                                @php
+                                    $marketChips = $chips[$market->key] ?? [];
+                                    $also = array_filter($marketChips, fn ($chip) => in_array($chip['state'], ['ok', 'setup'], true));
+                                    $ownOff = array_filter($marketChips, fn ($chip) => $chip['state'] === 'own-off');
+                                @endphp
+                                <tr class="{{ $market->is_enabled ? '' : 'mk-off' }}">
+                                    <td>
+                                        <strong>{{ $market->name }}</strong>
+                                        <br>
+                                        <span class="mk-key">{{ $market->key }}</span>
+                                    </td>
+                                    <td class="mk-dim">
+                                        <span class="mk-meta">{{ $where[$market->key] ?? '' }}</span>
+                                        @if($market->provider_slug)
+                                            <br>
+                                            <span class="mk-meta">slug <code>{{ $market->provider_slug }}</code></span>
+                                        @endif
+                                        @foreach($ownOff as $chip)
+                                            <div class="mk-status-err small">{{ $chip['title'] }}</div>
+                                        @endforeach
+                                        @if(!empty($also))
+                                            <div class="mt-1">
+                                                <span class="mk-meta">Also priced by</span>
+                                                @include('manager-core::markets.partials.chips', ['chips' => $also])
+                                            </div>
+                                        @endif
+                                    </td>
+                                    @include('manager-core::markets.partials.row-cells')
+                                </tr>
+                            @empty
+                                <tr class="mk-empty">
+                                    <td colspan="6">
+                                        @if($provider === 'esi')
+                                            No structure is read through ESI yet. Use <em>Add Market</em> and search for it by name.
+                                        @else
+                                            None on the list.
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforelse
                         @endforeach
                     </tbody>
                 </table>
-            @endif
+            </div>
         </div>
     </div>
 
     {{-- Operational notes --}}
     <div class="card card-dark mt-4">
         <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-info-circle"></i> How citadel pricing works</h3>
+            <h3 class="card-title"><i class="fas fa-info-circle"></i> Reading a structure through ESI</h3>
         </div>
         <div class="card-body">
             <p>
-                A citadel market is priced one of two ways: read straight from the structure through ESI,
-                or by a <strong>third-party service</strong> that tracks the hub.
-            </p>
-
-            <h5>Read from the structure (MCPraisal / ESI)</h5>
-            <p>
                 Works for any structure a director in the
                 <a href="{{ route('manager-core.esi-key-pool.index') }}">ESI Key Pool</a> can dock at, as long as
-                their token has the <code>esi-markets.structure_markets.v1</code> scope. Click
-                <em>Add Market</em>, keep <em>Citadel</em> and <em>MCPraisal (ESI)</em>, and put the structure ID in
-                the slug field; the name, system and region come from SeAT.
+                their token has the <code>esi-markets.structure_markets.v1</code> scope. Click <em>Add Market</em> and search
+                for the structure by its name; the system and region come from SeAT. A structure SeAT doesn't know yet can be
+                added by its ID, with its system picked by name.
             </p>
-            <p>
+            <p class="mb-0">
                 ESI can't filter a structure's market by item, so each refresh reads the whole market once
                 (one request per 1,000 orders, so a 50,000-order Keepstar takes about 50) and prices every
                 item plugins subscribe to from that one read. A read is reused for 15 minutes, and a failed
                 one keeps the cached prices.
             </p>
-
-            <h5>Pre-seeded Goonpraisal markets</h5>
-            <p>
-                Seven Goonpraisal-backed nullsec markets ship with every install:
-                <strong>Insmother (C-J6MT)</strong>, <strong>Insmother LAWN (GB-6X5)</strong>,
-                <strong>Tenerifis (UALX-3)</strong>, <strong>Catch (HY-RWO)</strong>,
-                <strong>Paragon Soul (O4T-Z5)</strong>, <strong>Esoteria (R-ARKN)</strong>,
-                <strong>Immensea (GM-0K7)</strong>. All disabled by default. Flip the toggle on the
-                row your alliance trades at, click <em>Test</em>, then point consumer plugins at the
-                market via <a href="{{ route('manager-core.pricing-preferences.index') }}">Pricing Preferences</a>.
-                They need no ESI token at all.
-            </p>
         </div>
     </div>
 </div>
+@endsection
 
+@push('javascript')
 <script>
     $(function () { $('[data-toggle="tooltip"]').tooltip(); });
 </script>
-@endsection
+@endpush

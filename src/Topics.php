@@ -585,6 +585,30 @@ class Topics
                 'description' => 'An operator changed a consumer plugin\'s pricing preference (market, price_type, and/or per-plugin provider_override) via MC\'s Pricing Preferences UI. Subscribers should flush any local price caches keyed by that plugin. Payload carries both old_* and new_* values for all three tracked fields plus action ("update"/"reset") and admin_overridden.',
             ],
 
+            // Published once per market per refresh, after the prices are
+            // stored: the scheduled refresh, the first fetch for newly
+            // subscribed types, and a retry that priced something. Not for
+            // a refresh that stored nothing. `plugins` names who the refresh
+            // was for, so a plugin it does not name can ignore the event.
+            'pricing.market_refreshed' => [
+                'publisher' => 'manager-core',
+                'required' => ['market', 'refreshed_at'],
+                'idempotency_template' => 'pricing.market_refreshed:{market}:{refreshed_at}',
+                'description' => 'Manager Core finished fetching prices for a market and they are stored. Plugins that keep their own copy of prices can read them now. Payload: market (key), refreshed_at (ISO 8601), plugins (the plugins the refresh was for; ignore the event when yours is not listed), type_count (types asked for), stored_count (types a price was stored for), trigger (schedule, subscription, retry, manual or request).',
+            ],
+
+            // The same, for prices plugins subscribed to at a market through
+            // a provider they named (pricing.subscribeVariants). Published
+            // once per market and provider per fetch that stored something,
+            // including when the market's own refresh priced variants
+            // through its own provider.
+            'pricing.variants_refreshed' => [
+                'publisher' => 'manager-core',
+                'required' => ['market', 'provider', 'refreshed_at'],
+                'idempotency_template' => 'pricing.variants_refreshed:{market}:{provider}:{refreshed_at}',
+                'description' => 'Manager Core finished fetching the prices plugins asked for at a market through a provider they named, and they are stored. Read them with pricing.getVariantPrices. Payload: market (key), provider, refreshed_at (ISO 8601), plugins (the plugins the fetch was for; ignore the event when yours is not listed), type_count (types asked for), stored_count (types a price was stored for), trigger (schedule, subscription, retry, manual or request).',
+            ],
+
             // -------- SeAT Broadcast (Discord Pings) --------
             // 2026-05-23: Broadcast events published from SeAT Broadcast v2.0.0.
             // Pings has its own BroadcastEventPublisher service and currently

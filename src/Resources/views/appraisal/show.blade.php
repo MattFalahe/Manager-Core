@@ -152,7 +152,7 @@
                     </dd>
 
                     {{-- Price provider used for this appraisal. Null for legacy
-                         rows (pre-migration 000021) or when the operator left
+                         rows (from before per-appraisal providers) or when the operator left
                          the form on "Use this market's configured provider" —
                          we surface that explicitly rather than hiding the row,
                          so the operator can always tell where the numbers came

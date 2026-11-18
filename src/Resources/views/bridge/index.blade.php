@@ -5,7 +5,7 @@
 
 @push('head')
 <link rel="stylesheet" href="{{ asset('vendor/manager-core/css/manager-core.css') }}?v=3">
-<link rel="stylesheet" href="{{ asset('vendor/manager-core/css/plugin-bridge.css') }}?v=3">
+<link rel="stylesheet" href="{{ asset('vendor/manager-core/css/plugin-bridge.css') }}?v=4">
 <style>
     .manager-core-wrapper .mc-bridge-tabs { margin-bottom: 0; }
     .manager-core-wrapper .mc-bridge-tabs .nav-link { color: #9aa3b0; cursor: pointer; border: none; }

@@ -297,20 +297,23 @@ class DiagnoseESICommand extends Command
         try {
             $response = Http::connectTimeout(5)->timeout(10)->get('https://esi.evetech.net/latest/status/');
 
+            // header() answers '' for a missing header, and a budget of '0' is
+            // the one worth seeing, so neither ?? nor a truthiness test will do.
             $errorLimit = $response->header('X-Esi-Error-Limit-Remain');
             $errorReset = $response->header('X-Esi-Error-Limit-Reset');
+            $hasErrorLimit = $errorLimit !== '';
 
             $this->table(
                 ['Metric', 'Value', 'Notes'],
                 [
                     ['Global Rate Limit', '20 req/sec', 'ESI documented limit'],
                     ['Burst Limit', '400 req/10sec', 'Maximum burst'],
-                    ['Error Budget Remaining', $errorLimit ?? 'N/A', 'Errors allowed before ban'],
+                    ['Error Budget Remaining', $hasErrorLimit ? $errorLimit : 'N/A', 'Errors allowed before ban'],
                     ['Error Budget Reset', $errorReset ? Carbon::now()->addSeconds($errorReset)->diffForHumans() : 'N/A', 'When error budget resets'],
                 ]
             );
 
-            if ($errorLimit && $errorLimit < 50) {
+            if ($hasErrorLimit && (int) $errorLimit < 50) {
                 $this->newLine();
                 $this->warn("  ⚠️  WARNING: Error budget is low ({$errorLimit} remaining)!");
                 $this->line('  Reduce ESI request frequency to avoid temporary ban');

@@ -14,19 +14,23 @@ Manager Core is the optional hub that every other plugin in the ecosystem can in
 
 ---
 
-## 🎉 What's in v1.1.0: The Ecosystem Era, Market Expansion
+## 🎉 What's in v1.2.0: The Ecosystem Era, Unlimited Price Provider Core
 
-**Citadel markets straight from the structure, and prices that hold up when a provider doesn't.** Any structure a director in your ESI Key Pool can dock at can be a market now, read through ESI's structure market endpoint, and you can add your own markets again. When a market's provider fails a refresh, a fallback provider stands in, and whatever nothing can price keeps its last price. Fuzzwork prices each hub from its station instead of its whole region, and Janice prices Amarr.
+**Any plugin, any provider, any market.** A plugin can name the provider it wants an item's price from at a market, and Manager Core keeps that price for it beside the market's own, so the same item at the same market can be priced by MCPraisal, Janice, Fuzzwork and Goonpraisal at once. Those prices refresh on the 4-hour schedule and never more often than each provider allows, nothing stands in for a provider a plugin named, and no provider is asked about a place it would price at Jita 4-4 instead. Any plugin can list the markets it may offer, with what each provider can do there.
 
-Notifications ESI serves late still reach the plugins (Manager Core keeps them up to two weeks, and each plugin says how old it takes them), and notifications the sweep finds reach the plugins with nobody in the key pool. The Plugin Bridge page lists plugins from outside the suite that register themselves, the Director Key Pool table filters by corporation and status, and the Watchdog reports a failing Janice key once instead of every hour.
+A provider picked for a plugin on Pricing Preferences reads prices kept for that plugin instead of asking the provider on every read, and won't save a provider that can't price the market. The Markets page shows what each provider can do at every hub, and Add Market finds a structure, system or region by name or ID and offers only the providers that can price it. The Plugin Bridge's ecosystem simulation is drawn again, with a band for the compatible plugins from outside the suite.
 
-Backwards compatible: one new table (migration 000018), nothing in the existing tables changes. Full details in [CHANGELOG.MD](CHANGELOG.MD).
+Disabling a hub now stops its refresh, Janice prices Rens, Dodixie and Hek at their own stations, and testing a provider on Diagnostics or picking one on an appraisal no longer changes the market's prices for every plugin.
+
+Backwards compatible: two new tables (migrations 000019 and 000020), nothing in the existing tables changes. Full details in [CHANGELOG.MD](CHANGELOG.MD).
+
+v1.1.0 (The Ecosystem Era: Market Expansion) brought citadel markets read straight from the structure through ESI, a fallback provider when a market's provider fails, hub prices from each hub's station, and notifications ESI serves late still reaching the plugins.
 
 ### Hub services every plugin can use
 
 | Service | What it gives consumer plugins |
 |---|---|
-| **Pricing Orchestrator** | Per-market provider routing across 5 sources: MCPraisal (ESI: the region endpoint for hubs, the structure market endpoint for citadels), Goonpraisal, Janice, Fuzzwork, SeAT prices-core. Operators pick which upstream powers each market, and which provider stands in when it fails. Per-plugin preferences with admin override. **Per-plugin `provider_override`** lets one consumer plugin route through a different provider for the same market (e.g. Mining Manager via Janice for Jita while Structure Manager continues through Fuzzwork). |
+| **Pricing Orchestrator** | Per-market provider routing across 5 sources: MCPraisal (ESI: the region endpoint for hubs, the structure market endpoint for citadels), Goonpraisal, Janice, Fuzzwork, SeAT prices-core. Operators pick which upstream powers each market, and which provider stands in when it fails. Per-plugin preferences with admin override. **Per-plugin `provider_override`** lets one consumer plugin route through a different provider for the same market (e.g. Mining Manager via Janice for Jita while Structure Manager continues through Fuzzwork). **Provider variants** let a plugin read any provider's price at any market beside the market's own, stored and refreshed for it. |
 | **EventBus** | Pub/sub with idempotency dedup, visibility scoping, Discord-injection sanitization, queued or sync delivery. Topics facade for one-line publishing. |
 | **Plugin Bridge** | Capability registry. Plugins advertise functions, others discover and call them. Worker-registry snapshots for queue-worker visibility. A 6-state detection model (offline / standalone / discovered / partial / full / error) computed entirely from live runtime signals — installed class, registered capabilities, real subscription + pricing rows, recent event traffic, and outbound-publish relationships — drives the ecosystem map and Plugin Connections tab. Nothing about the connections is hardcoded; the only static config is the plugin roster and event-prefix ownership. |
 | **Appraisal System** | go-evepraisal-style parser with group/category SDE classification. Public + private appraisals with secure tokens. |
@@ -91,7 +95,7 @@ Or visit **Manager Core → Diagnostics** in the SeAT sidebar.
 
 ## 🔌 Compatible plugins
 
-Status as of v1.1.0. Six plugins are released on Packagist and integrate today; **Buyback Manager is in preparation** (MC is already wired for it, but it is not yet released). Industry Manager and Ratting Manager don't use MC yet. The Plugin Bridge's 6-state model shows each installed plugin's live wiring on the ecosystem map:
+Status as of v1.2.0. Six plugins are released on Packagist and integrate today; **Buyback Manager is in preparation** (MC is already wired for it, but it is not yet released). Industry Manager and Ratting Manager don't use MC yet. The Plugin Bridge's 6-state model shows each installed plugin's live wiring on the ecosystem map:
 
 | Plugin | Integration state | What it does with MC |
 |---|---|---|
@@ -102,7 +106,6 @@ Status as of v1.1.0. Six plugins are released on Packagist and integrate today; 
 | [HR Manager](https://github.com/MattFalahe/HR-Manager) | ✅ Active | Subscribes to `mining.*`, `member.*`, `wallet.*`, `blueprint.request.*`, `structure.alert.*` and `pings.*` for the player classifier, publishes its `hr.application.*` / `hr.player.*` events, and reads Corp Wallet, Blueprint and Structure Manager capabilities (`compliance.getForCorporation` for structure compliance inside Corp Health) |
 | [Blueprint Manager](https://github.com/MattFalahe/Blueprint-Manager) | ✅ Active | Publishes `blueprint.request.*` lifecycle events (HR Manager subscribes); exposes 2 read-only capabilities |
 | [Buyback Manager](https://github.com/MattFalahe/Buyback-Manager) | 🔜 In preparation | Not yet released on Packagist. Once it ships it will read pricing via PluginBridge and publish `buyback.*` offer/contract events. MC already routes pricing for it |
-
 Plugins detect MC at boot via `class_exists(\ManagerCore\Topics::class)`. Installing or uninstalling MC never breaks any plugin — integrations come online or fall back automatically.
 
 ---
@@ -160,7 +163,22 @@ $price = app(\ManagerCore\Services\PricingService::class)
     ->priceForPlugin('your-plugin', $typeId);
 ```
 
-Admin can override your plugin's pricing source via **Manager Core → Pricing Preferences** without you needing to ship a UI for it. Each plugin's row carries a `market`, `price_type`, AND optional `provider_override` — the override lets the operator route your plugin's reads through a specific provider (e.g. Janice) different from the market's default routing. Your plugin gets this for free as long as you call `priceForPlugin` / `pricesForPlugin`. If you need both buy + sell stats simultaneously (`pricing.getPrices`), pass your plugin key as the optional 4th arg so MC consults the override.
+Admin can override your plugin's pricing source via **Manager Core → Pricing Preferences** without you needing to ship a UI for it. Each plugin's row carries a `market`, `price_type`, AND optional `provider_override` — the override lets the operator route your plugin's reads through a specific provider (e.g. Janice) different from the market's default routing. Manager Core keeps that provider's prices for your plugin and refreshes them with the market's, and Pricing Preferences won't save a provider that can't price the market. Your plugin gets this for free as long as you call `priceForPlugin` / `pricesForPlugin`. If you need both buy + sell stats simultaneously (`pricing.getPrices`), pass your plugin key as the optional 4th arg so MC consults the override.
+
+### Read one provider's price at a market
+
+```php
+$bridge = app(\ManagerCore\Services\PluginBridge::class);
+
+// When your items change. 'reason' says why not when the provider can't
+// price that market (Fuzzwork or Janice off the five hubs, say).
+$answer = $bridge->call('ManagerCore', 'pricing.subscribeVariants', 'your-plugin', [34, 35], 'jita', 'janice');
+
+// Each side is getPrices' stats plus the provider and when it was fetched.
+$prices = $bridge->call('ManagerCore', 'pricing.getVariantPrices', [34, 35], 'jita', 'janice');
+```
+
+These are kept apart from the market's own prices and refreshed with them, every 4 hours. `pricing.variants_refreshed` names your plugin when yours are in, and `pricing.listMarkets` says which providers can price each market (`providers`). Nothing stands in for a provider you named: when it fails, its last price stays.
 
 ### Register a Plugin Bridge capability
 
@@ -209,13 +227,15 @@ What became of each notification at each plugin (handled, queued, failed, or too
 
 ---
 
-## 📊 Database schema (18 tables)
+## 📊 Database schema (20 tables)
 
 | Table | Purpose |
 |---|---|
 | `manager_core_market_prices` | Current market prices per type / market / order_type |
 | `manager_core_price_history` | Daily aggregated price history |
 | `manager_core_type_subscriptions` | Which plugins want prices for which types |
+| `manager_core_market_price_variants` | Prices per type / market / provider / order_type, for plugins that name a provider |
+| `manager_core_variant_subscriptions` | Which plugins want which types at a market through a named provider |
 | `manager_core_appraisals` | Appraisal records (public + private) |
 | `manager_core_appraisal_items` | Items within appraisals with SDE classification |
 | `manager_core_plugin_registry` | Discovered plugins + their capabilities |
@@ -240,7 +260,8 @@ What became of each notification at each plugin (handled, queued, failed, or too
 # Refresh market prices for all configured markets (runs every 4h via cron)
 # Routes through whichever provider is configured per market — hub markets
 # hit ESI's region endpoint, citadel markets read the structure through ESI
-# or ask Goonpraisal / Janice.
+# or ask Goonpraisal / Janice. Without --types it also queues the prices
+# plugins asked for through a provider they named.
 manager-core:update-prices --market=all
 manager-core:update-prices --market=jita --types=34,35,36
 
@@ -251,7 +272,7 @@ manager-core:poll-esi-notifications
 manager-core:sweep-seat-notifications
 
 # Maintenance
-manager-core:cleanup                       # old appraisals / price history (daily 03:00)
+manager-core:cleanup                       # old appraisals / price history / unsubscribed variant prices (daily 03:00)
 manager-core:cleanup-events                # forensic logs (daily 04:00)
 manager-core:cleanup-stale-subscriptions   # type subscriptions for absent plugins (daily 05:00)
 

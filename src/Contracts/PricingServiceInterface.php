@@ -36,10 +36,11 @@ interface PricingServiceInterface
      * The optional 4th arg `$pluginKeyForOverride` (Option B, 2026-05-29)
      * lets a caller route through a per-plugin provider_override stored
      * on manager_core_pricing_preferences. When set AND that plugin has
-     * a non-null override, MC does a LIVE upstream fetch via the override
-     * provider instead of reading its local cache. Backwards compat:
-     * existing 3-arg callers behave exactly as before (cached read,
-     * per-market provider routing).
+     * a non-null override, the prices come through the override provider,
+     * kept under the plugin's name and refreshed with the market; the
+     * provider is asked during the read only for an item with no recent
+     * price through it. Backwards compat: existing 3-arg callers behave
+     * exactly as before (cached read, per-market provider routing).
      *
      * @param array $typeIds
      * @param string $market
@@ -63,8 +64,9 @@ interface PricingServiceInterface
 
     /**
      * Batch version of priceForPlugin. Returns `[typeId => ?float]` for
-     * every typeId in the input. One pref lookup + (when provider_override
-     * is set) one batch upstream call regardless of $typeIds length.
+     * every typeId in the input. One pref lookup and one batch read
+     * regardless of $typeIds length; through a provider_override, the
+     * provider is asked only for items with no recent price kept for it.
      *
      * @param int[] $typeIds
      * @return array<int, ?float>
@@ -107,9 +109,10 @@ interface PricingServiceInterface
      *
      * @param string $pluginName
      * @param string|null $market Market to limit the unsubscribe to, or null for all markets
+     * @param int[]|null $typeIds Only these types, or null for every type in scope. An empty list removes none
      * @return int Number of subscription rows removed
      */
-    public function unregisterTypes(string $pluginName, ?string $market = null): int;
+    public function unregisterTypes(string $pluginName, ?string $market = null, ?array $typeIds = null): int;
 
     /**
      * Get the union of subscribed type IDs across all plugins for a market

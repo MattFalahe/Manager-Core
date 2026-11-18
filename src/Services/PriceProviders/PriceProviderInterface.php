@@ -10,13 +10,13 @@ interface PriceProviderInterface
     /**
      * Get prices for given type IDs.
      *
-     * MUST return a populated map even when $persist=true — the per-plugin
-     * provider_override path (PricingService::fetchLivePricesViaOverride)
-     * relies on the return value because that path deliberately bypasses
-     * MC's local cache. Implementations that only populated the DB as a
-     * side-effect and returned [] silently broke Option B reads; the
-     * 2026-05-29 contract clarification makes the return value the
-     * authoritative source-of-truth for callers.
+     * MUST return a populated map even when $persist=true. Every fetch that
+     * isn't stored under the market (a plugin's provider override, provider
+     * variants, an appraisal's picked provider) reads the return value, since
+     * the market's rows are its own provider's. Implementations that only
+     * populated the DB as a side-effect and returned [] silently broke those
+     * reads; the return value is the authoritative source-of-truth for
+     * callers.
      *
      * Each `[buy]` and `[sell]` stats array follows
      * `PricingService::formatPriceStats` shape: keys `min`, `max`, `avg`,

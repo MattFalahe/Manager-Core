@@ -73,7 +73,10 @@
             <span class="badge" style="background:#6b46c1; color:#fff;" title="{{ $v['message'] }}">
                 <i class="fas fa-rocket"></i> Coming soon
             </span>
-            <div style="font-size: 0.7rem; color: #8b95a5; margin-top: 2px;">installed: {{ $v['current'] }}</div>
+            {{-- A plugin loaded from a path repository has no version Composer knows. --}}
+            @if($v['current'])
+                <div style="font-size: 0.7rem; color: #8b95a5; margin-top: 2px;">installed: {{ $v['current'] }}</div>
+            @endif
         @elseif($v && $v['status'] === 'unknown')
             <span class="badge badge-secondary" title="{{ $v['message'] }}">
                 <i class="fas fa-question-circle"></i> v{{ $v['current'] }}
@@ -183,7 +186,7 @@
     </td>
 </tr>
 <tr class="plugin-detail-row" data-detail="{{ $key }}" style="display: none;">
-    <td colspan="6">
+    <td colspan="7">
         <div class="plugin-detail-panel">
             <div class="detail-reason">
                 <i class="fas fa-circle" style="color: {{ $stateColors[$state] ?? '#6c757d' }}; font-size: 0.6rem; vertical-align: middle;"></i>

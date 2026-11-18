@@ -27,27 +27,24 @@ class ESIPriceProvider implements PriceProviderInterface
     /**
      * Get prices for given type IDs.
      *
-     * MCPraisal's $persist=false caveat: MarketDataService is the entire
-     * ESI fetching architecture and writes to MarketPrice as a side effect
-     * — there's no efficient way to fetch from CCP without persisting.
-     * When an operator sets MCPraisal as a per-plugin provider_override,
-     * we honour the call but the side-effect writes WILL update MC's
-     * shared cache rows. If another plugin reads the same market it
-     * would see this plugin's MCPraisal data until the next per-market
-     * cron tick overwrites it again. Operators using MCPraisal as an
-     * override should be aware of this — it's documented in the in-app
-     * Help under Pricing → Per-plugin provider override.
-     *
-     * Janice / Fuzzwork / Goonpraisal don't have this caveat — they
-     * properly support $persist=false (build the in-memory map, skip
-     * the DB write).
+     * With $persist=false a hub's order book is worked out without storing
+     * it, so a plugin asking MCPraisal about a market another provider
+     * prices leaves that market's prices alone, as Janice, Fuzzwork and
+     * Goonpraisal do. A structure is read only for a market set to
+     * MCPraisal, and what it reads there is that market's own price, so a
+     * structure market is stored whichever way it is asked.
      */
     public function getPrices(array $typeIds, string $market, bool $persist = true): array
     {
-        Log::info("[Manager Core] Fetching prices from ESI for " . count($typeIds) . " types in {$market}");
+        Log::info("[Manager Core] Fetching prices from ESI for " . count($typeIds) . " types in {$market}" . ($persist ? '' : ' (not stored)'));
 
-        if (!$persist) {
-            Log::warning("[Manager Core] MCPraisal: \$persist=false requested but not supported — MarketDataService side-effect-persists. Override-using plugin will cache-pollute the shared (type_id, market, price_type) rows. See Help → Pricing → Per-plugin provider override.");
+        if (!$persist && !$this->marketDataService->isStructureMarket($market)) {
+            $out = array_fill_keys(array_map('intval', $typeIds), null);
+            foreach ($this->marketDataService->collectMarketPrices($typeIds, $market) as $typeId => $stats) {
+                $out[(int) $typeId] = $stats;
+            }
+
+            return $out;
         }
 
         // Use the existing MarketDataService to fetch and calculate prices.

@@ -271,10 +271,10 @@ class WatchdogService
                     'label' => 'Price cron overdue (sample)',
                     'alert' => [
                         'title' => 'Price cron overdue (sample)',
-                        'message' => 'SAMPLE: Newest cached price is 540min old. Cron is scheduled every 240min, threshold is 2× = 480min. Run `manager-core:update-prices` manually to test the command. See Diagnostics → Overview for provider + cache state.',
+                        'message' => 'SAMPLE: The scheduled price refresh last stored a price 540min ago. Prices a plugin asked for since do not count. Cron is scheduled every 240min, threshold is 2× = 480min. Run `manager-core:update-prices` manually to test the command. See Diagnostics → Overview for provider + cache state.',
                         'severity' => 'warning',
                         'context' => [
-                            'newest_price_age_min' => 540,
+                            'last_scheduled_refresh_age_min' => 540,
                             'cron_interval_min' => 240,
                             'threshold_min' => 480,
                             'total_cached_rows' => 12847,

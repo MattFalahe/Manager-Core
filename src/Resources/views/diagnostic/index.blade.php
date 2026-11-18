@@ -308,7 +308,7 @@
                     <div class="diag-tab-intro">
                         <p><strong>What this tab does:</strong> Runs a live price fetch against the selected provider (Fuzzwork, MCPraisal, Goonpraisal, Janice, or SeAT) for a sample of mineral type IDs and reports response time and success rate. The lower section tests a single market's ESI connectivity, verifies orders exist in that region, and compares its prices with Jita.</p>
                         <p><strong>When to use:</strong> When appraisals or cached prices look wrong, or after enabling one of the 7 pre-seeded Goonpraisal nullsec markets to confirm it returns orders.</p>
-                        <p><strong>Heads up:</strong> Provider tests bypass MC's per-market routing — they hit whichever upstream you pick here, regardless of what's configured on the Markets page. The ESI Connection test calls CCP live and counts against the shared error budget — run it deliberately, not on a loop.</p>
+                        <p><strong>Heads up:</strong> Provider tests bypass MC's per-market routing: they hit whichever upstream you pick here, regardless of what's configured on the Markets page. What a provider other than the market's own answers is shown here and not stored, so plugins reading the market keep its own prices. MCPraisal is the exception, since it can't fetch without storing. The ESI Connection test calls CCP live and counts against the shared error budget — run it deliberately, not on a loop.</p>
                     </div>
                     <h4 style="color: #e2e8f0; margin-bottom: 15px;"><i class="fas fa-dollar-sign"></i> Price Provider Testing</h4>
                     <div class="row mb-3">
@@ -512,6 +512,12 @@ function statusBadge(status) {
 
 function resultCard(cls, title, content) {
     return '<div class="result-card ' + cls + '"><h5>' + title + '</h5>' + content + '</div>';
+}
+
+// For text a plugin or a provider wrote, put into HTML.
+function escText(value) {
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ---- System Overview ----
@@ -801,6 +807,38 @@ function loadSubscriptionHealth() {
         if (d.plugins && d.plugins.length > 0) {
             html += resultCard('info', 'Per-Plugin Breakdown', '<table class="diag-table"><tr><th>Plugin</th><th>Market</th><th>Types</th></tr>'
                 + d.plugins.map(p => '<tr><td>' + p.plugin_name + '</td><td>' + p.market + '</td><td>' + p.count + '</td></tr>').join('') + '</table>');
+        }
+
+        // Prices plugins asked for through a provider they named, kept apart
+        // from each market's own prices.
+        if (d.variants && d.variants.length > 0) {
+            const staleAfter = d.stale_after_minutes || 480;
+            let attention = false;
+            const rows = d.variants.map(v => {
+                let note = '';
+                if (!v.market_enabled) note = 'The market is disabled, so nothing is fetched there.';
+                else if (v.place_reason) note = v.place_reason;
+                else if (!v.available) note = v.provider_label + ' is not set up.';
+                else if (v.priced === 0) note = 'No price yet.';
+                else if (v.newest && (Date.now() - Date.parse(v.newest.replace(' ', 'T') + 'Z')) / 60000 > staleAfter) note = 'The newest price is over twice the refresh interval old.';
+                if (note) attention = true;
+
+                const last = v.last_fetch
+                    ? v.last_fetch.at + ': ' + v.last_fetch.priced + ' of ' + v.last_fetch.asked + ' priced' + (v.last_fetch.error ? ' (' + v.last_fetch.error + ')' : '')
+                    : '-';
+
+                return '<tr><td>' + escText(v.market_name) + '</td>'
+                    + '<td>' + escText(v.provider_label) + (v.own ? ' <small>(the market\'s own)</small>' : '') + '</td>'
+                    + '<td>' + escText(v.plugins.join(', ')) + '</td>'
+                    + '<td>' + v.subscribed + '</td><td>' + v.priced + '</td>'
+                    + '<td>' + escText(v.newest || '-') + '</td>'
+                    + '<td>' + escText(last) + (note ? '<br><span style="color:#ffc107;">' + escText(note) + '</span>' : '') + '</td></tr>';
+            }).join('');
+
+            html += resultCard(attention ? 'warning' : 'info', 'Prices through a named provider',
+                '<p style="margin-bottom:8px;">Items plugins asked for at a market through a provider they picked. These are fetched apart from the market\'s own prices, so the counts above leave them out.</p>'
+                + '<table class="diag-table"><tr><th>Market</th><th>Provider</th><th>Plugins</th><th>Items</th><th>With a price</th><th>Newest price (UTC)</th><th>Last fetch</th></tr>'
+                + rows + '</table>');
         }
 
         document.getElementById('subscription-results').innerHTML = html || '<div class="empty-state"><i class="fas fa-inbox"></i> No subscriptions found</div>';

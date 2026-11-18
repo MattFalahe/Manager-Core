@@ -4,6 +4,57 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 
 ---
 
+## [1.2.0] - The Ecosystem Era: Unlimited Price Provider Core
+
+*18 November 2026.* Any plugin can read any provider's price at any market, side by side with the market's own.
+
+**Backwards compatible.** Two new tables (migrations 000019 and 000020), and nothing in the existing tables changes. Every topic and bridge capability a plugin uses today keeps its arguments and its answer, with a `provider` key added to each side of a price. Two things read differently: a provider override on Pricing Preferences reads prices kept for the plugin, up to 4 hours old like every other price, where it asked the provider on every read, and `pricing.getPreferenceForPlugin` names the market's provider where such an override reads the market's prices.
+
+### 💹 Prices through any provider
+
+- **A plugin names the provider it wants.** `pricing.subscribeVariants` subscribes items at a market through MCPraisal, Janice, Fuzzwork or Goonpraisal, `pricing.getVariantPrices` reads them back in `getPrices`' shape, and `pricing.unsubscribeVariants` drops them. The same item at the same market can have several providers' prices at once, kept apart from the market's own.
+- **Fetched on the 4-hour schedule**, never more often than the provider allows, and announced with `pricing.variants_refreshed`. Through the market's own provider, the market's refresh copies them across, so nothing is asked for twice.
+- **Nothing stands in.** A provider a plugin named that fails keeps its last price, and no provider is asked about a place it would price at Jita 4-4.
+- **Diagnostics** lists what plugins ask for under Subscriptions, Check Health, and the Master Test warns about any that can't be fetched or have gone stale. Prices no plugin subscribes to are deleted a week after their last fetch.
+
+### 🎚️ Provider overrides read kept prices
+
+- **A provider picked for a plugin on Pricing Preferences is kept and refreshed like the rest.** A read asks the provider only for an item with no kept price or one older than 8 hours, and saving an override fetches the plugin's items straight away. The market's own provider, picked as an override, reads the market's prices.
+- **Pricing Preferences won't save a provider that can't price the market**, and says why. An override saved before the update that can't reads the market's own prices instead of Jita's, and its Status and Diagnostics say so.
+- **`pricing.getPreferenceForPlugin` names the provider that answers**, with a new `override_reads` key for which way an override goes.
+
+### 🗺️ Markets page
+
+- **Every hub shows what each provider can do there**, and citadel markets are grouped by the provider that prices them.
+- **Add Market starts with a search.** Type a structure's name, its system or its ID, or a system or region, and the rest fills itself in from SeAT's own tables. Only a provider that can price the place can be picked.
+
+### 🔌 New for plugins
+
+- **`pricing.listMarkets`** lists the markets a plugin can offer, with what each provider can do at each.
+- **`pricing.refreshIfOlder`** asks for newer prices between refreshes, through the market's provider or one it names, for a plugin Manager Core lets ask. It fetches only items the plugin subscribes to, and never more often than the provider allows: half an hour, an hour on Janice.
+- **`pricing.market_refreshed`** is published once a refresh has stored prices for a market.
+- **`pricing.unsubscribeTypes`** takes the items to drop as an optional third argument, and every side of a price names its `provider`.
+
+### 🧭 Plugin Bridge and Watchdog
+
+- **The ecosystem simulation is drawn again** with Manager Core as the hub: each plugin of the family has a spoke to it, since everything they send each other goes through it. A Compatible band holds the plugins from outside the suite that registered with Manager Core on your server.
+- **Price cron overdue goes by the scheduled refresh itself**, so prices asked for between runs can't hide a schedule that stopped. **Provider unavailable** also counts the providers plugins name for their prices.
+
+### 🐛 Fixes
+
+- **Help's menu showed a blank page after a search** until the page was reloaded.
+- **Testing a provider on Diagnostics overwrote the market's prices** for every plugin until the next refresh, and so did picking a provider on an appraisal, or MCPraisal as a plugin's override at a hub. They answer the test, the appraisal or the plugin alone now.
+- **A market added on Fuzzwork or Janice was quietly priced at Jita 4-4.** The Markets form refuses one now. Markets already saved that way keep running as they are.
+- **Janice priced Rens, Dodixie and Hek at Jita 4-4.** It asks for their own markets (116, 117 and 118) from the first refresh after the update.
+- **Disabling a hub did nothing**: the scheduled refresh kept fetching it. **If you disabled a hub and a plugin still reads its prices, enable it again on the Markets page**, or those prices stop updating.
+- **A key made from a long structure name couldn't be picked on Pricing Preferences.** A new key is 32 characters at most. Markets you already added keep theirs.
+- **Items subscribed within 30 seconds of another subscribe** at the same market could wait up to 4 hours for a price. They are fetched at the end of the 30 seconds now.
+- **Reading stored prices took two queries for every type.** It takes one per 1,000 types now.
+- **`/pricing/type/{id}` was a server error.** The route is gone.
+- **`manager-core:diagnose-esi --show-limits`** showed a blank error budget when ESI sent none, and never warned at 0.
+
+---
+
 ## [1.1.0] - The Ecosystem Era: Market Expansion
 
 *13 November 2026.* Citadel markets read straight from the structure, a fallback provider when one fails, hub prices from the hub itself, and notifications ESI serves late still reaching the plugins.

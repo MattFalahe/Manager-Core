@@ -62,12 +62,6 @@ Route::group([
             'middleware' => 'can:manager-core.pricing.view',
         ]);
 
-        Route::get('/type/{typeId}', [
-            'as'   => 'manager-core.pricing.type',
-            'uses' => 'PricingController@showType',
-            'middleware' => 'can:manager-core.pricing.view',
-        ]);
-
         Route::post('/subscribe', [
             'as'   => 'manager-core.pricing.subscribe',
             'uses' => 'PricingController@subscribe',
@@ -148,6 +142,13 @@ Route::group([
         Route::get('/create', [
             'as'   => 'manager-core.markets.create',
             'uses' => 'MarketsController@create',
+        ]);
+
+        // The form's suggestions: structures, systems and regions found by
+        // name or ID in SeAT's own tables, and what each provider can do there
+        Route::get('/places', [
+            'as'   => 'manager-core.markets.places',
+            'uses' => 'MarketsController@places',
         ]);
 
         Route::post('/', [

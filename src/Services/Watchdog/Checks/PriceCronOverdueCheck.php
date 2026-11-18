@@ -6,11 +6,12 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use ManagerCore\Models\MarketPrice;
+use ManagerCore\Services\PricingService;
 use ManagerCore\Services\Watchdog\WatchdogCheck;
 
 /**
- * Alert when the price-refresh cron hasn't run for noticeably longer
- * than its configured cadence.
+ * Alert when the scheduled price refresh hasn't stored a price for
+ * noticeably longer than its configured cadence.
  *
  * Failure modes this catches:
  *   - SeAT scheduler is dead (no cron ticks reaching the queue)
@@ -18,9 +19,14 @@ use ManagerCore\Services\Watchdog\WatchdogCheck;
  *   - All providers are unreachable (no rows updated)
  *   - Cron expression got nuked from the schedules table somehow
  *
- * Threshold: newest MarketPrice.updated_at is more than 2× the cron
- * interval old. Default cron is `0 *_/4 * * *` = every 240 minutes,
- * so anything > 480 minutes (8 hours) old fires the alert.
+ * Threshold: the last scheduled refresh that stored a price is more than
+ * 2× the cron interval ago.
+ *
+ * It reads the time the scheduled refresh itself keeps, not the newest
+ * price in the table: a plugin may ask for prices between the scheduled
+ * runs, and those would keep the newest price young over a dead schedule.
+ * Until a scheduled refresh has kept its time once (the first run after
+ * the update that added it), the newest price is still what it goes by.
  */
 class PriceCronOverdueCheck implements WatchdogCheck
 {
@@ -31,13 +37,13 @@ class PriceCronOverdueCheck implements WatchdogCheck
     public function label(): string { return 'Price cron overdue'; }
     public function description(): string
     {
-        return 'Alerts when the newest cached market price is older than 2× the scheduled cron interval. Indicates SeAT scheduler is dead, the command is throwing, or all providers are unreachable.';
+        return 'Alerts when the scheduled price refresh has not stored a price for more than 2× its interval. Prices a plugin asks for between the scheduled runs do not count. Indicates SeAT scheduler is dead, the command is throwing, or all providers are unreachable.';
     }
 
     public function run(): ?array
     {
         try {
-            $totalRows = MarketPrice::count();
+            $totalRows = $this->priceRowCount();
             if ($totalRows === 0) {
                 // Fresh install with no prices yet — not a watchdog alert
                 // (operator just needs to wait for the first cron tick).
@@ -47,27 +53,31 @@ class PriceCronOverdueCheck implements WatchdogCheck
             $intervalMin = $this->resolveCronIntervalMinutes();
             $thresholdMin = $intervalMin * 2;
 
-            $newestRaw = MarketPrice::max('updated_at');
-            if (!$newestRaw) {
+            $scheduled = $this->lastScheduledRefreshAt();
+            $last = $scheduled ?? $this->newestPriceAt();
+            if (!$last) {
                 return null;
             }
 
-            $newest = Carbon::parse($newestRaw);
-            $ageMin = (int) $newest->diffInMinutes(Carbon::now());
+            $ageMin = (int) $last->diffInMinutes(Carbon::now());
 
             if ($ageMin <= $thresholdMin) {
                 return null;
             }
 
+            $what = $scheduled
+                ? "The scheduled price refresh last stored a price {$ageMin}min ago. Prices a plugin asked for since do not count."
+                : "Newest cached price is {$ageMin}min old.";
+
             return [
                 'title' => 'Price cron overdue',
-                'message' => "Newest cached price is {$ageMin}min old. Cron is scheduled every {$intervalMin}min, threshold is 2× = {$thresholdMin}min. Run `manager-core:update-prices` manually to test the command. See Diagnostics → Overview for provider + cache state.",
+                'message' => "{$what} Cron is scheduled every {$intervalMin}min, threshold is 2× = {$thresholdMin}min. Run `manager-core:update-prices` manually to test the command. See Diagnostics → Overview for provider + cache state.",
                 'severity' => $ageMin >= $thresholdMin * 3 ? 'critical' : 'warning',
                 'context' => [
-                    'newest_price_age_min' => $ageMin,
+                    ($scheduled ? 'last_scheduled_refresh_age_min' : 'newest_price_age_min') => $ageMin,
                     'cron_interval_min' => $intervalMin,
                     'threshold_min' => $thresholdMin,
-                    'newest_price_at' => (string) $newest,
+                    ($scheduled ? 'last_scheduled_refresh_at' : 'newest_price_at') => (string) $last,
                     'total_cached_rows' => $totalRows,
                 ],
             ];
@@ -75,6 +85,24 @@ class PriceCronOverdueCheck implements WatchdogCheck
             Log::warning('[MC Watchdog] PriceCronOverdueCheck error: ' . $e->getMessage());
             return null;
         }
+    }
+
+    protected function priceRowCount(): int
+    {
+        return (int) MarketPrice::count();
+    }
+
+    /** When a scheduled refresh last stored a price, if one has kept its time yet. */
+    protected function lastScheduledRefreshAt(): ?Carbon
+    {
+        return PricingService::lastScheduledRefreshAt();
+    }
+
+    protected function newestPriceAt(): ?Carbon
+    {
+        $newest = MarketPrice::max('updated_at');
+
+        return $newest ? Carbon::parse($newest) : null;
     }
 
     /**

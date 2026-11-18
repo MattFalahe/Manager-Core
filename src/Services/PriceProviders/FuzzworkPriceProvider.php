@@ -108,9 +108,8 @@ class FuzzworkPriceProvider implements PriceProviderInterface
                     if ($row === null) {
                         continue;
                     }
-                    // Build the in-memory return value from the upstream row.
-                    // Required by Option B's fetchLivePricesViaOverride path
-                    // which deliberately bypasses MC's local cache.
+                    // Build the in-memory return value from the upstream row:
+                    // a fetch that isn't stored under the market reads it.
                     $out[$tidInt] = $this->buildStatsFromFuzzworkRow($row);
                     if ($persist) {
                         $this->storeFromFuzzworkRow($tidInt, $market, $row);

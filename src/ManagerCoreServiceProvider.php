@@ -181,13 +181,15 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
             // work after this change.
             // 4th arg `$pluginKeyForOverride` (added Option B 2026-05-29).
             // When set AND that plugin has a non-null provider_override on
-            // its manager_core_pricing_preferences row, MC does a LIVE
-            // batch fetch via the override provider instead of reading
-            // its local cache. Lets a single consumer plugin (e.g. Mining
-            // Manager) route through Janice while other plugins reading
-            // the same market continue to use the per-market provider
-            // (e.g. Fuzzwork). Backwards compat: 3-arg calls work
-            // unchanged — they take the per-market routing path.
+            // its manager_core_pricing_preferences row, the answer comes
+            // through the override provider: prices kept under the
+            // plugin's name and refreshed with the market, the provider
+            // asked during the read only for an item with no recent price
+            // through it (PricingService::overridePrices). Lets a single
+            // consumer plugin (e.g. Mining Manager) price through Janice
+            // while other plugins reading the same market continue to use
+            // the per-market provider (e.g. Fuzzwork). Backwards compat:
+            // 3-arg calls work unchanged — they take the per-market path.
             $bridge->registerCapability('ManagerCore', 'pricing.getPrices', function ($typeIds, $market = 'jita', $priceType = 'both', ?string $pluginKeyForOverride = null) {
                 $pricingService = app(\ManagerCore\Services\PricingService::class);
                 return $pricingService->getPrices(
@@ -226,10 +228,13 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
             // under schema drift, bypasses any future audit/observer logic).
             //
             // $market=null removes ALL the plugin's subscriptions; pass a
-            // specific market string to scope. Returns the deleted count.
-            $bridge->registerCapability('ManagerCore', 'pricing.unsubscribeTypes', function ($pluginName, $market = null) {
+            // specific market string to scope. $typeIds names the types to
+            // remove, for a plugin that stops needing some of them: null
+            // removes every type in scope, an empty list none. Returns the
+            // deleted count.
+            $bridge->registerCapability('ManagerCore', 'pricing.unsubscribeTypes', function ($pluginName, $market = null, $typeIds = null) {
                 $pricingService = app(\ManagerCore\Services\PricingService::class);
-                return $pricingService->unregisterTypes($pluginName, $market);
+                return $pricingService->unregisterTypes($pluginName, $market, $typeIds === null ? null : (array) $typeIds);
             });
 
             // Per-plugin pricing preference: one row in
@@ -285,50 +290,26 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
             //     'admin_overridden'    => bool,    // true if operator-edited
             //     'provider_override'   => string|null, // per-plugin provider override (Option B); null = use market provider
             //     'market_provider'     => string,  // the market's configured provider key
-            //     'effective_provider'  => string,  // override OR market_provider — what reads ACTUALLY route through
+            //     'effective_provider'  => string,  // the provider that answers the plugin's reads
             //     'provider_label'      => string,  // human label of effective_provider
+            //     'override_reads'      => string|null, // kept | own | cannot_price | live; null without an override
             //   ]
             //
-            // Note: the previous 'provider' field is now 'effective_provider'
-            // for clarity. Consumer plugins reading getPreferenceForPlugin
-            // for status display should switch to 'effective_provider' +
-            // 'provider_override' for the full picture. 'provider' kept as
-            // an alias of effective_provider for back-compat.
+            // effective_provider is the override only where reads go through
+            // it ('kept', or 'live' at a market Manager Core doesn't have).
+            // An override naming the market's own provider ('own') or one
+            // that can't price the market ('cannot_price') reads the market's
+            // prices, so the market's provider is the effective one there.
+            // 'provider' is kept as an alias of effective_provider for
+            // plugins written before it was renamed.
             $bridge->registerCapability('ManagerCore', 'pricing.getPreferenceForPlugin', function (string $pluginKey): ?array {
                 try {
                     $pref = \ManagerCore\Models\PricingPreference::where('plugin_key', $pluginKey)->first();
                     if (!$pref) {
                         return null;
                     }
-                    $market = \ManagerCore\Models\Market::where('key', $pref->market)->first();
-                    $marketProvider = $market->provider ?? 'fuzzwork';
-                    $providerOverride = $pref->provider_override ?? null;
-                    if ($providerOverride === '') {
-                        $providerOverride = null;
-                    }
-                    $effective = $providerOverride ?? $marketProvider;
-                    $labelOf = fn(string $p): string => match($p) {
-                        'esi' => 'MCPraisal (Manager Core ESI)',
-                        'fuzzwork' => 'Fuzzwork',
-                        'janice' => 'Janice',
-                        'goonpraisal' => 'Goonpraisal',
-                        'seat' => 'SeAT Price Provider',
-                        default => ucfirst($p),
-                    };
-                    return [
-                        'market'             => $pref->market,
-                        'market_name'        => $market->name ?? $pref->market,
-                        'price_type'         => $pref->price_type,
-                        'admin_overridden'   => (bool) ($pref->admin_overridden ?? false),
-                        'provider_override'  => $providerOverride,
-                        'market_provider'    => $marketProvider,
-                        'effective_provider' => $effective,
-                        'provider_label'     => $labelOf($effective),
-                        // Back-compat: pre-Option-B callers reading 'provider'
-                        // get the effective provider, which is what they
-                        // expected (the one that actually serves their reads).
-                        'provider'           => $effective,
-                    ];
+
+                    return app(\ManagerCore\Services\PricingService::class)->describePreference($pref);
                 } catch (\Throwable $e) {
                     return null;
                 }
@@ -451,6 +432,114 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
                         'stale_count' => 0,
                         'error' => 'unavailable',
                     ];
+                }
+            });
+
+            // Every market a plugin can offer its users, keyed by market key.
+            // Each entry: key, name, market_type, provider, provider_label,
+            // is_enabled, last_refresh_at (ISO 8601 or null),
+            // last_refresh_status, prices_own_place (false when the provider
+            // would price the market somewhere else, as Fuzzwork and Janice
+            // do at Jita 4-4 for a market they don't track), place_reason
+            // (why, or null) and providers: for each provider, its label,
+            // own (the market's own provider), available (set up),
+            // prices_place and place_reason, which is what
+            // pricing.subscribeVariants accepts there. Pass false to include
+            // disabled markets.
+            $bridge->registerCapability('ManagerCore', 'pricing.listMarkets', function ($enabledOnly = true): array {
+                try {
+                    return app(\ManagerCore\Services\PricingService::class)->listMarkets((bool) $enabledOnly);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[Manager Core] pricing.listMarkets failed: ' . $e->getMessage());
+
+                    return [];
+                }
+            });
+
+            // Fetch again, on the worker, the types whose stored price at
+            // the market is older than $maxAgeSeconds, between the scheduled
+            // refreshes. Only for the plugins listed in the config under
+            // pricing.refresh_on_request, only for types the plugin is
+            // subscribed to at the market, and never more often than the
+            // provider allows. Returns queued (types being fetched), fresh
+            // (types young enough already) and reason (why nothing can be
+            // fetched for this plugin: not_allowed, unknown_market,
+            // unknown_provider, not_subscribed or error; null otherwise).
+            // The fetch ends in pricing.market_refreshed with the asking
+            // plugin alone in `plugins` and trigger `request`.
+            //
+            // With $provider named, the ask is for the plugin's variants at
+            // the market through that provider (pricing.subscribeVariants),
+            // and ends in pricing.variants_refreshed.
+            $bridge->registerCapability('ManagerCore', 'pricing.refreshIfOlder', function ($pluginName, $typeIds, $market, $maxAgeSeconds = 3600, $provider = null): array {
+                try {
+                    return app(\ManagerCore\Services\PricingService::class)
+                        ->refreshIfOlder((string) $pluginName, (array) $typeIds, (string) $market, (int) $maxAgeSeconds,
+                            $provider === null ? null : (string) $provider);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[Manager Core] pricing.refreshIfOlder failed: ' . $e->getMessage());
+
+                    return ['queued' => 0, 'fresh' => 0, 'reason' => 'error'];
+                }
+            });
+
+            // Any provider's price for an item at any market, next to the
+            // market's own: a variant. A plugin subscribes to the items it
+            // wants at a market through a provider it names (esi, fuzzwork,
+            // janice or goonpraisal); the scheduled refresh fetches them
+            // without touching the market's own prices, and nothing stands
+            // in for a provider that fails. A provider is refused at a place
+            // it doesn't price: reason cannot_price_place, with place_reason
+            // saying why. pricing.listMarkets says what every provider can
+            // do at each market. Returns subscribed (count), reason
+            // (unknown_provider, unknown_market, cannot_price_place or
+            // error; null otherwise) and place_reason.
+            $bridge->registerCapability('ManagerCore', 'pricing.subscribeVariants', function ($pluginName, $typeIds, $market, $provider, $priority = 1, $immediateRefresh = true): array {
+                try {
+                    return app(\ManagerCore\Services\PricingService::class)
+                        ->subscribeVariants((string) $pluginName, (array) $typeIds, (string) $market, (string) $provider, (int) $priority, (bool) $immediateRefresh);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[Manager Core] pricing.subscribeVariants failed: ' . $e->getMessage());
+
+                    return ['subscribed' => 0, 'reason' => 'error', 'place_reason' => null];
+                }
+            });
+
+            // Remove a plugin's variant subscriptions: all of them, or only
+            // those at $market, through $provider, or for $typeIds (an empty
+            // list removes none). Returns the count removed.
+            $bridge->registerCapability('ManagerCore', 'pricing.unsubscribeVariants', function ($pluginName, $market = null, $provider = null, $typeIds = null): int {
+                try {
+                    return app(\ManagerCore\Services\PricingService::class)->unsubscribeVariants(
+                        (string) $pluginName,
+                        $market === null ? null : (string) $market,
+                        $provider === null ? null : (string) $provider,
+                        $typeIds === null ? null : (array) $typeIds
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[Manager Core] pricing.unsubscribeVariants failed: ' . $e->getMessage());
+
+                    return 0;
+                }
+            });
+
+            // A provider's prices at a market, in pricing.getPrices' shape:
+            // [typeId => ['buy' => stats|null, 'sell' => stats|null]], or one
+            // side's stats with $priceType buy or sell. Each side names its
+            // provider and carries updated_at. No price for a variant nobody
+            // subscribes to, or one not fetched yet.
+            $bridge->registerCapability('ManagerCore', 'pricing.getVariantPrices', function ($typeIds, $market, $provider, $priceType = 'both'): array {
+                try {
+                    return app(\ManagerCore\Services\PricingService::class)->getVariantPrices(
+                        is_array($typeIds) ? $typeIds : [$typeIds],
+                        (string) $market,
+                        (string) $provider,
+                        (string) $priceType
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[Manager Core] pricing.getVariantPrices failed: ' . $e->getMessage());
+
+                    return [];
                 }
             });
 
