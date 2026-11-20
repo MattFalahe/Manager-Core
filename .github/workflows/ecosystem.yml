@@ -55,7 +55,7 @@ jobs:
       package: ${{ steps.plan.outputs.package }}
       relation: ${{ steps.plan.outputs.relation }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: MattFalahe/manager-core
           ref: ${{ inputs.kit-ref }}
@@ -96,7 +96,7 @@ jobs:
             echo "::notice title=Ecosystem checks skipped::$branch is neither $DEFAULT_BRANCH nor the work branch $active ($source)."
           fi
       - if: steps.branch.outputs.run == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ env.PLUGIN_REPOSITORY }}
           ref: ${{ env.PLUGIN_REF }}
@@ -118,13 +118,13 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ env.PLUGIN_REPOSITORY }}
           ref: ${{ env.PLUGIN_REF }}
           path: plugin
           fetch-depth: 0
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: MattFalahe/manager-core
           ref: ${{ inputs.kit-ref }}
@@ -148,12 +148,12 @@ jobs:
       matrix:
         php: ['8.1', '8.2', '8.3', '8.4']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ env.PLUGIN_REPOSITORY }}
           ref: ${{ env.PLUGIN_REF }}
           path: plugin
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: MattFalahe/manager-core
           ref: ${{ inputs.kit-ref }}
@@ -165,7 +165,7 @@ jobs:
           coverage: none
           tools: composer:v2
           extensions: ${{ env.SEAT_EXTENSIONS }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/composer
           key: composer-${{ runner.os }}-php${{ matrix.php }}-${{ github.run_id }}
@@ -214,13 +214,13 @@ jobs:
           --health-cmd="redis-cli ping"
           --health-interval=5s --health-timeout=5s --health-retries=30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ env.PLUGIN_REPOSITORY }}
           ref: ${{ env.PLUGIN_REF }}
           path: plugin
           fetch-depth: 0
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: MattFalahe/manager-core
           ref: ${{ inputs.kit-ref }}
@@ -233,7 +233,7 @@ jobs:
           coverage: none
           tools: composer:v2
           extensions: ${{ env.SEAT_EXTENSIONS }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/composer
           key: composer-${{ runner.os }}-php8.4-${{ github.run_id }}
@@ -294,12 +294,12 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ env.PLUGIN_REPOSITORY }}
           ref: ${{ env.PLUGIN_REF }}
           path: plugin
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: MattFalahe/manager-core
           ref: ${{ inputs.kit-ref }}
