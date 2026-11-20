@@ -103,33 +103,56 @@ final class RuntimeCheck
         $r->covered('mc-contract', "topics, capabilities and subscriptions against $label");
 
         // Capabilities this plugin registers.
+        // The install holds only the plugin and Manager Core, so what it makes
+        // only beside another plugin is noted, not required.
         $registered = $bridge->registeredCapabilityNames($key)[$key] ?? [];
         $declared = $p->manifestList('capabilities', 'provides');
-        foreach (array_diff($registered, $declared) as $cap) {
+        foreach (array_diff($registered, Plugin::everything($p->manifest, 'provides')) as $cap) {
             $r->error('mc-contract', 'ecosystem.json', null, "The plugin registers capability $cap, which the manifest does not list.");
         }
         foreach (array_diff($declared, $registered) as $cap) {
             $r->error('mc-contract', 'ecosystem.json', null, "The manifest lists capability $cap, but the plugin does not register it with $label.");
+        }
+        foreach (Plugin::conditional($p->manifest, 'provides') as $other => $caps) {
+            if ($missing = array_diff($caps, $registered)) {
+                $r->notice('mc-contract', 'ecosystem.json', null, 'Not registered here, since they need ' . $other . ', which this install does not have: ' . implode(', ', $missing) . '.');
+            }
         }
 
         // Subscriptions it stores.
         $rows = \ManagerCore\Models\EventSubscription::where('subscriber_plugin', $key)->where('is_active', true)->get();
         $stored = [];
         foreach ($rows as $row) {
-            $handler = $row->handler_capability ?: trim(($row->handler_class ?? '') . '@' . ($row->handler_method ?? 'handle'), '@');
-            $stored[$row->event_pattern . ' ' . $handler] = [$row->event_pattern, $row->handler_capability, $row->handler_class ?? null];
-        }
-        $declaredSubs = [];
-        foreach ($p->manifestList('subscribes') as $sub) {
-            if (is_array($sub) && isset($sub['topic'], $sub['handler'])) {
-                $declaredSubs[$sub['topic'] . ' ' . $sub['handler']] = true;
+            // A class handler's handler_capability is an internal key Manager
+            // Core makes up for its unique index, not a capability.
+            if ($row->handler_class) {
+                $handler = $row->handler_class . '@' . ($row->handler_method ?: 'handle');
+                $stored[$row->event_pattern . ' ' . $handler] = [$row->event_pattern, null, $row->handler_class];
+            } else {
+                $stored[$row->event_pattern . ' ' . $row->handler_capability] = [$row->event_pattern, $row->handler_capability, null];
             }
         }
-        foreach (array_diff_key($stored, $declaredSubs) as $id => $_) {
+        $ids = function (array $subs): array {
+            $out = [];
+            foreach ($subs as $sub) {
+                if (is_array($sub) && isset($sub['topic'], $sub['handler'])) {
+                    $out[$sub['topic'] . ' ' . $sub['handler']] = true;
+                }
+            }
+
+            return $out;
+        };
+        $declaredSubs = $ids($p->manifestList('subscribes'));
+        foreach (array_diff_key($stored, $ids(Plugin::everything($p->manifest, 'subscribes'))) as $id => $_) {
             $r->error('mc-contract', 'ecosystem.json', null, "The plugin subscribes to $id (topic, handler), which the manifest does not list.");
         }
         foreach (array_diff_key($declaredSubs, $stored) as $id => $_) {
             $r->error('mc-contract', 'ecosystem.json', null, "The manifest lists the subscription $id (topic, handler), but the plugin does not make it with $label.");
+        }
+        foreach (Plugin::conditional($p->manifest, 'subscribes') as $other => $subs) {
+            if ($missing = array_keys(array_diff_key($ids($subs), $stored))) {
+                $r->notice('mc-contract', 'ecosystem.json', null, 'Not subscribed here, since they need ' . $other . ', which this install does not have: ' . implode(', ', $missing) . '.');
+            }
         }
         foreach ($stored as [$pattern, $capability, $class]) {
             if ($capability && !$bridge->hasCapability($key, $capability)) {

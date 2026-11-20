@@ -38,7 +38,7 @@ final class CrossPluginCheck
             }
         }
 
-        foreach ($p->manifestList('subscribes') as $sub) {
+        foreach (Plugin::everything($p->manifest, 'subscribes') as $sub) {
             $pattern = is_array($sub) ? (string) ($sub['topic'] ?? '') : '';
             $regex = '/^' . str_replace('\*', '.*', preg_quote($pattern, '/')) . '$/';
             if (!preg_grep($regex, array_keys($published))) {
@@ -52,7 +52,7 @@ final class CrossPluginCheck
                 continue;
             }
             if ($target === '*') {
-                if (!array_filter($manifests, fn ($m) => in_array($cap, (array) ($m['capabilities']['provides'] ?? []), true))) {
+                if (!array_filter($manifests, fn ($m) => in_array($cap, Plugin::everything($m, 'provides'), true))) {
                     $r->notice('cross-plugin', 'ecosystem.json', null, "Calls $cap on whichever plugin provides it; none does yet.");
                 }
                 continue;
@@ -61,7 +61,7 @@ final class CrossPluginCheck
                 $r->notice('cross-plugin', 'ecosystem.json', null, "Calls $target:$cap; $target's manifest could not be read, so the call was not checked.");
             } elseif (!isset($manifests[$target])) {
                 $r->error('cross-plugin', 'ecosystem.json', null, "Calls $target:$cap, but no plugin named $target is in the ecosystem list.");
-            } elseif (!in_array($cap, (array) ($manifests[$target]['capabilities']['provides'] ?? []), true)) {
+            } elseif (!in_array($cap, Plugin::everything($manifests[$target], 'provides'), true)) {
                 $r->error('cross-plugin', 'ecosystem.json', null, "Calls $target:$cap, which $target does not provide.");
             }
         }
@@ -74,7 +74,7 @@ final class CrossPluginCheck
 
         $subscribed = [];
         foreach ($manifests as $m) {
-            foreach ((array) ($m['subscribes'] ?? []) as $sub) {
+            foreach (Plugin::everything($m, 'subscribes') as $sub) {
                 $subscribed[] = '/^' . str_replace('\*', '.*', preg_quote((string) ($sub['topic'] ?? ''), '/')) . '$/';
             }
         }

@@ -12,7 +12,7 @@ use Ecosystem\Source;
 /** The manifest exists and says something the other checks can use. */
 final class ManifestCheck
 {
-    private const KEYS = ['plugin', 'manager_core', 'publishes', 'subscribes', 'capabilities', 'routes', 'migration_identifier', 'notes'];
+    private const KEYS = ['plugin', 'manager_core', 'publishes', 'subscribes', 'capabilities', 'when_installed', 'routes', 'migration_identifier', 'notes'];
 
     public function run(Plugin $p, Report $r, array $o): void
     {
@@ -65,6 +65,37 @@ final class ManifestCheck
         foreach ($p->manifestList('subscribes') as $i => $sub) {
             if (!is_array($sub) || !is_string($sub['topic'] ?? null) || !is_string($sub['handler'] ?? null)) {
                 $r->error('manifest', 'ecosystem.json', null, "subscribes[$i] must be {\"topic\": ..., \"handler\": ...}.");
+            }
+        }
+
+        $when = $m['when_installed'] ?? [];
+        if (!is_array($when) || ($when !== [] && array_is_list($when))) {
+            $r->error('manifest', 'ecosystem.json', null, "'when_installed' must map a plugin key to what this plugin provides and subscribes to only while that plugin is installed.");
+            $when = [];
+        }
+        $own = array_merge($p->manifestList('capabilities', 'provides'), array_map(fn ($s) => json_encode($s), $p->manifestList('subscribes')));
+        foreach ($when as $plugin => $section) {
+            $at = "when_installed.$plugin";
+            if (!preg_match('/^([a-z0-9]+(-[a-z0-9]+)*|ManagerCore)$/', (string) $plugin) || $plugin === ($m['plugin'] ?? null)) {
+                $r->error('manifest', 'ecosystem.json', null, "'$at' must be keyed by another plugin's bridge key.");
+            }
+            if (!is_array($section) || array_diff(array_keys($section), ['provides', 'subscribes'])) {
+                $r->error('manifest', 'ecosystem.json', null, "'$at' may hold only provides and subscribes.");
+                continue;
+            }
+            $provides = $section['provides'] ?? [];
+            if (!is_array($provides) || !array_is_list($provides) || array_filter($provides, fn ($v) => !is_string($v) || $v === '')) {
+                $r->error('manifest', 'ecosystem.json', null, "'$at.provides' must be a list of names.");
+                $provides = [];
+            }
+            foreach ((array) ($section['subscribes'] ?? []) as $i => $sub) {
+                if (!is_array($sub) || !is_string($sub['topic'] ?? null) || !is_string($sub['handler'] ?? null)) {
+                    $r->error('manifest', 'ecosystem.json', null, "$at.subscribes[$i] must be {\"topic\": ..., \"handler\": ...}.");
+                }
+            }
+            $named = array_merge($provides, array_map(fn ($s) => json_encode($s), (array) ($section['subscribes'] ?? [])));
+            foreach (array_intersect($named, $own) as $twice) {
+                $r->error('manifest', 'ecosystem.json', null, "$twice is under both the plugin's own lists and '$at'. It is one or the other.");
             }
         }
 
@@ -438,8 +469,9 @@ final class ManifestSourceCheck
         $r->covered('manifest-vs-source', 'publishes, subscribes, capabilities and routes');
 
         $declared = fn (string ...$path) => $p->manifestList(...$path);
-        $absent = function (string $name, string $what) use ($literals, $r) {
-            if (!isset($literals[$name])) {
+        // A name that is not a string is the manifest check's finding.
+        $absent = function (mixed $name, string $what) use ($literals, $r) {
+            if (is_string($name) && !isset($literals[$name])) {
                 $r->error('manifest-vs-source', 'ecosystem.json', null, "$what '$name' is in the manifest but nowhere in the source.");
             }
         };
@@ -452,7 +484,7 @@ final class ManifestSourceCheck
             }
             $absent($topic, 'Published topic');
         }
-        foreach ($declared('subscribes') as $sub) {
+        foreach (Plugin::everything($p->manifest, 'subscribes') as $sub) {
             if (is_array($sub) && isset($sub['topic'], $sub['handler'])) {
                 $absent((string) $sub['topic'], 'Subscribed topic');
                 $handler = (string) $sub['handler'];
@@ -468,7 +500,7 @@ final class ManifestSourceCheck
                 }
             }
         }
-        foreach ($declared('capabilities', 'provides') as $cap) {
+        foreach (Plugin::everything($p->manifest, 'provides') as $cap) {
             $absent($cap, 'Provided capability');
         }
         foreach ($declared('capabilities', 'calls') as $call) {
@@ -510,7 +542,7 @@ final class ManifestSourceCheck
                     $r->error('manifest-vs-source', 'ecosystem.json', null, "The code calls $target:$cap, which the manifest does not list.");
                     $calls["$target:$cap"] = true;
                 }
-            } elseif (!isset($callCaps[$cap]) && !in_array($cap, $declared('capabilities', 'provides'), true)) {
+            } elseif (!isset($callCaps[$cap]) && !in_array($cap, Plugin::everything($p->manifest, 'provides'), true)) {
                 $r->error('manifest-vs-source', 'ecosystem.json', null, "The code calls capability '$cap' (on $target), which the manifest does not list.");
                 $callCaps[$cap] = true;
             }

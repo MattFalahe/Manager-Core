@@ -76,6 +76,12 @@ The variants come from the manifest: no Manager Core, its minimum tag and `dev` 
         "provides": ["blueprint.getCorpSummary"],
         "calls": ["ManagerCore:pricing.getPrices", "corp-wallet-manager:wallet.getCorpSummary"]
     },
+    "when_installed": {
+        "structure-manager": {
+            "provides": ["structure.notify_alert"],
+            "subscribes": [{ "topic": "structure.alert.*", "handler": "structure.notify_alert" }]
+        }
+    },
     "routes": {
         "serves": ["buyback.appraisal.create"],
         "uses": ["structure-manager.doctrines.index"]
@@ -88,6 +94,7 @@ The variants come from the manifest: no Manager Core, its minimum tag and `dev` 
 - `migration_identifier`: the word every new migration's name carries.
 - `subscribes[].handler`: a capability name, or `Class@method` for a class handler.
 - `capabilities.calls`: `plugin:capability`; `*:capability` calls whichever plugin provides it.
+- `when_installed`: what the plugin provides and subscribes to only while another plugin is installed, keyed by that plugin. The install job has only the plugin and Manager Core, so it notes these rather than requiring them. The source and link checks treat them like the rest. Anything that works without the other plugin belongs in the plugin's own lists.
 - `routes.serves`: routes another plugin links to; `routes.uses`: routes of another plugin this one links to.
 
 When code starts or stops publishing a topic, subscribing to one, calling a capability or serving a route another plugin uses, the manifest changes in the same commit.

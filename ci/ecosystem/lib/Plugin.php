@@ -120,6 +120,40 @@ final class Plugin
         return is_array($value) ? array_values($value) : [];
     }
 
+    /**
+     * What the plugin provides or subscribes to only while another plugin is
+     * installed, from when_installed: plugin key => list.
+     *
+     * @param 'provides'|'subscribes' $what
+     */
+    public static function conditional(?array $manifest, string $what): array
+    {
+        $out = [];
+        foreach ((array) ($manifest['when_installed'] ?? []) as $plugin => $section) {
+            $list = is_array($section) ? ($section[$what] ?? []) : [];
+            $out[(string) $plugin] = is_array($list) ? array_values($list) : [];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Every capability or subscription a manifest names, its own and those it
+     * makes only with another plugin installed.
+     *
+     * @param 'provides'|'subscribes' $what
+     */
+    public static function everything(?array $manifest, string $what): array
+    {
+        $own = $what === 'provides' ? ($manifest['capabilities']['provides'] ?? []) : ($manifest['subscribes'] ?? []);
+        $all = is_array($own) ? array_values($own) : [];
+        foreach (self::conditional($manifest, $what) as $list) {
+            array_push($all, ...$list);
+        }
+
+        return $all;
+    }
+
     public function path(string $relative): string
     {
         return $this->dir . '/' . $relative;
