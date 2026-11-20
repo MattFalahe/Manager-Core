@@ -1,8 +1,10 @@
 name: Ecosystem nightly
 
-# Every plugin's work branch, checked against Manager Core dev and against
-# each other, so a change in one plugin that breaks another shows the next
-# morning even when the broken plugin has not been pushed.
+# Every plugin's release on its default branch and its work branch, checked
+# against Manager Core dev and against each other. A change in one plugin that
+# breaks another shows the next morning even when the broken one has not been
+# pushed, and a released build that has fallen out of step with the rest
+# shows as something for its next release.
 
 on:
   schedule:
@@ -23,10 +25,26 @@ jobs:
         with:
           sparse-checkout: ci
       - id: list
-        run: echo "matrix={\"include\":$(jq -c . ci/ecosystem/plugins.json)}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          entries='[]'
+          while read -r row; do
+            repo=$(jq -r .repository <<< "$row")
+            entries=$(jq -c --argjson e "$row" '. + [$e]' <<< "$entries")
+            release=$(gh api "repos/$repo" --jq .default_branch)
+            [ "$release" = "$(jq -r .branch <<< "$row")" ] && continue
+            # A release from before the checks has no manifest to check against.
+            if gh api "repos/$repo/contents/ecosystem.json?ref=$release" --silent 2> /dev/null; then
+              entries=$(jq -c --argjson e "$row" --arg b "$release" '. + [$e + {branch: $b}]' <<< "$entries")
+            else
+              echo "::notice title=$repo $release not checked::$release has no ecosystem.json yet. It is checked from the release that brings one."
+            fi
+          done < <(jq -c '.[]' ci/ecosystem/plugins.json)
+          echo "matrix={\"include\":$entries}" >> "$GITHUB_OUTPUT"
 
   plugin:
-    name: ${{ matrix.plugin }}
+    name: ${{ matrix.plugin }} ${{ matrix.branch }}
     needs: list
     strategy:
       fail-fast: false

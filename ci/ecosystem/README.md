@@ -23,6 +23,18 @@ A plugin needs two files:
 
 - `ecosystem.json` at its root, the manifest described below.
 
+## Which branches
+
+Two branches per plugin are checked: the default branch, where the release lives, and the work branch `plugins.json` names. A push to any other branch skips the checks with a note saying why, so a branch the work has moved on from costs nothing. When work moves to a new branch, change that plugin's line in `plugins.json`.
+
+A plugin that `plugins.json` does not list names its work branch in its own workflow instead:
+
+```yaml
+    uses: MattFalahe/manager-core/.github/workflows/ecosystem.yml@dev
+    with:
+      work-branch: dev-1.0
+```
+
 ## What runs
 
 **Source.** One job reads the code without running it:
@@ -49,7 +61,7 @@ The variants come from the manifest: no Manager Core, its minimum tag and `dev` 
 
 **Links to other plugins.** The manifest is checked against every other plugin's manifest on its work branch: a subscription to a topic nobody publishes, a call to a capability its plugin does not provide, a link to a route nobody serves.
 
-**Nightly.** `ecosystem-nightly.yml` runs all of it for every plugin in `plugins.json`, against Manager Core `dev`, so a change in one plugin that breaks another shows the next morning.
+**Nightly.** `ecosystem-nightly.yml` runs all of it for every plugin in `plugins.json`, on its default branch and its work branch, against Manager Core `dev`. A change in one plugin that breaks another shows the next morning, and so does a release that has fallen out of step with the rest, as something for its next release. A default branch whose release came before these checks has no `ecosystem.json` and is skipped until the release that brings one.
 
 ## The manifest
 

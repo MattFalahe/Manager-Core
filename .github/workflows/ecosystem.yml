@@ -24,6 +24,10 @@ on:
         description: Ref to check, when it is not the pushed commit
         type: string
         default: ''
+      work-branch:
+        description: The plugin's work branch, for a plugin plugins.json does not list
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -45,33 +49,73 @@ jobs:
     name: Plan
     runs-on: ubuntu-latest
     outputs:
-      mc-variants: ${{ steps.plan.outputs.mc-variants }}
+      run: ${{ steps.branch.outputs.run }}
+      # A valid list even when nothing runs, so the install matrix still parses.
+      mc-variants: ${{ steps.plan.outputs.mc-variants || '["absent"]' }}
       package: ${{ steps.plan.outputs.package }}
       relation: ${{ steps.plan.outputs.relation }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ env.PLUGIN_REPOSITORY }}
-          ref: ${{ env.PLUGIN_REF }}
-          path: plugin
-          fetch-depth: 0
       - uses: actions/checkout@v4
         with:
           repository: MattFalahe/manager-core
           ref: ${{ inputs.kit-ref }}
           path: kit
           sparse-checkout: ci
-      - uses: shivammathur/setup-php@v2
+      # Only the release on the default branch and the plugin's work branch
+      # are checked, never a branch the work has moved on from. The work
+      # branch comes from plugins.json, so moving to a new one is one line
+      # there, or from the work-branch input for a plugin it does not list.
+      - id: branch
+        env:
+          ASKED_REF: ${{ inputs.plugin-ref }}
+          WORK_BRANCH: ${{ inputs.work-branch }}
+          EVENT: ${{ github.event_name }}
+          PUSHED: ${{ github.ref_name }}
+          PR_BASE: ${{ github.base_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ -n "$ASKED_REF" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          branch="$PUSHED"
+          [ "$EVENT" = pull_request ] && branch="$PR_BASE"
+          active=$(jq -r --arg repo "${PLUGIN_REPOSITORY,,}" '.[] | select((.repository | ascii_downcase) == $repo) | .branch' kit/ci/ecosystem/plugins.json)
+          source="from Manager Core's ci/ecosystem/plugins.json"
+          if [ -z "$active" ]; then
+            active="$WORK_BRANCH"
+            source="from work-branch in this repository's .github/workflows/ecosystem.yml"
+          fi
+          if [ -z "$active" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No work branch named::Neither plugins.json nor work-branch names this plugin's work branch, so every branch is checked."
+          elif [ "$branch" = "$DEFAULT_BRANCH" ] || [ "$branch" = "$active" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Ecosystem checks skipped::$branch is neither $DEFAULT_BRANCH nor the work branch $active ($source)."
+          fi
+      - if: steps.branch.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PLUGIN_REPOSITORY }}
+          ref: ${{ env.PLUGIN_REF }}
+          path: plugin
+          fetch-depth: 0
+      - if: steps.branch.outputs.run == 'true'
+        uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
           coverage: none
           tools: none
       - id: plan
+        if: steps.branch.outputs.run == 'true'
         run: php kit/ci/ecosystem/check.php plan plugin | tee -a "$GITHUB_OUTPUT"
 
   static:
     name: Source
     needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +141,7 @@ jobs:
   classes:
     name: Classes on PHP ${{ matrix.php }}
     needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -144,6 +189,7 @@ jobs:
   install:
     name: SeAT install, Manager Core ${{ matrix.mc }}
     needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -245,6 +291,7 @@ jobs:
   cross:
     name: Links to other plugins
     needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
