@@ -1,0 +1,38 @@
+name: Ecosystem nightly
+
+# Every plugin's work branch, checked against Manager Core dev and against
+# each other, so a change in one plugin that breaks another shows the next
+# morning even when the broken plugin has not been pushed.
+
+on:
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    name: Plugins
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ci
+      - id: list
+        run: echo "matrix={\"include\":$(jq -c . ci/ecosystem/plugins.json)}" >> "$GITHUB_OUTPUT"
+
+  plugin:
+    name: ${{ matrix.plugin }}
+    needs: list
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.list.outputs.matrix) }}
+    uses: ./.github/workflows/ecosystem.yml
+    with:
+      kit-ref: dev
+      plugin-repository: ${{ matrix.repository }}
+      plugin-ref: ${{ matrix.branch }}

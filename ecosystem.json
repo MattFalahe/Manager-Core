@@ -1,0 +1,31 @@
+{
+    "plugin": "ManagerCore",
+    "manager_core": { "relation": "self" },
+    "migration_identifier": "manager_core",
+    "publishes": [
+        "pricing.preference_changed",
+        "pricing.market_refreshed",
+        "pricing.variants_refreshed",
+        "manager-core.diagnostic.test"
+    ],
+    "subscribes": [],
+    "capabilities": {
+        "provides": [
+            "appraisal.create", "appraisal.get",
+            "bridge.discoverCapabilities", "bridge.registerSelf", "bridge.requireMinimumVersion",
+            "esi.getRegisteredNotificationTypes", "esi.importKeyHolders", "esi.registerNotificationHandler",
+            "events.getSubscriptions", "events.publish", "events.subscribe",
+            "pricing.getMarketStats", "pricing.getPreferenceForPlugin", "pricing.getPrice", "pricing.getPrices",
+            "pricing.getSubscribedTypeCount", "pricing.getTrend", "pricing.getVariantPrices", "pricing.listMarkets",
+            "pricing.preferencesUrl", "pricing.priceForPlugin", "pricing.pricesForPlugin", "pricing.refreshIfOlder",
+            "pricing.registerPreference", "pricing.subscribeTypes", "pricing.subscribeVariants",
+            "pricing.unsubscribeTypes", "pricing.unsubscribeVariants",
+            "sde.typeIconUrl", "sde.typeInfo", "sde.typeName", "sde.typeNames"
+        ],
+        "calls": ["*:notify"]
+    },
+    "routes": {
+        "serves": ["manager-core.esi-key-pool.index"],
+        "uses": []
+    }
+}

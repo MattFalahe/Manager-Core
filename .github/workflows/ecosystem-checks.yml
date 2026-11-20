@@ -1,0 +1,15 @@
+name: Ecosystem
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ecosystem:
+    uses: ./.github/workflows/ecosystem.yml
+    with:
+      # Check Manager Core with the kit from the same commit.
+      kit-ref: ${{ github.sha }}

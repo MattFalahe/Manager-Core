@@ -3,3 +3,5 @@
 /.gitignore export-ignore
 /phpunit.xml.dist export-ignore
 /tests export-ignore
+/ci export-ignore
+/ecosystem.json export-ignore

@@ -1,0 +1,12 @@
+[
+    { "plugin": "ManagerCore", "repository": "MattFalahe/manager-core", "branch": "dev" },
+    { "plugin": "mining-manager", "repository": "MattFalahe/Mining-Manager", "branch": "dev-7.0" },
+    { "plugin": "structure-manager", "repository": "MattFalahe/Structure-Manager", "branch": "dev-5.0" },
+    { "plugin": "corp-wallet-manager", "repository": "MattFalahe/Corp-Wallet-Manager", "branch": "dev-3.2" },
+    { "plugin": "hr-manager", "repository": "MattFalahe/HR-Manager", "branch": "dev" },
+    { "plugin": "blueprint-manager", "repository": "MattFalahe/Blueprint-Manager", "branch": "dev-3.0" },
+    { "plugin": "seat-discord-pings", "repository": "MattFalahe/SeAT-Discord-Pings", "branch": "dev-2.0" },
+    { "plugin": "ratting-manager", "repository": "MattFalahe/Ratting-Manager", "branch": "dev-1.0" },
+    { "plugin": "buyback-manager", "repository": "MattFalahe/Buyback-Manager", "branch": "dev-1.0" },
+    { "plugin": "industry-manager", "repository": "MattFalahe/Industry-Manager", "branch": "dev" }
+]
