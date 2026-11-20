@@ -34,6 +34,11 @@ env:
   # The commit the push started from, so migration rules know what is new.
   SINCE: ${{ github.event.before || github.event.pull_request.base.sha || '' }}
   SEAT_EXTENSIONS: bcmath, ctype, curl, dom, fileinfo, gd, gmp, intl, json, mbstring, openssl, pcntl, pdo_mysql, posix, redis, tokenizer, xml, zip
+  # SeAT 5 is pinned to Laravel 10, which has published advisories, and
+  # Composer 2.9+ refuses those by default. The test install has to get the
+  # same packages a real SeAT runs. The second name is the older spelling.
+  COMPOSER_NO_BLOCKING: '1'
+  COMPOSER_NO_SECURITY_BLOCKING: '1'
 
 jobs:
   plan:
