@@ -558,6 +558,53 @@ class EventBus implements \ManagerCore\Contracts\EventBusInterface
     }
 
     /**
+     * What one plugin published lately, for that plugin's own Diagnostics, so
+     * it never has to read manager_core_event_log itself. Payloads stay out:
+     * they can carry character names and ISK amounts the caller already has.
+     *
+     * @return array{publisher: string, hours: int, counts: array<int, array>, recent: array<int, array>}
+     */
+    public function getRecentForPublisher(string $publisher, int $hours = 24, int $limit = 20): array
+    {
+        $hours = max(1, min($hours, 24 * 30));
+        $limit = max(1, min($limit, 100));
+        $since = now()->subHours($hours);
+
+        $counts = EventLog::query()
+            ->where('publisher_plugin', $publisher)
+            ->where('created_at', '>=', $since)
+            ->selectRaw('event_name, status, COUNT(*) as total, MAX(created_at) as last_at')
+            ->groupBy('event_name', 'status')
+            ->orderBy('event_name')
+            ->orderBy('status')
+            ->get()
+            ->map(fn ($row) => [
+                'event_name' => $row->event_name,
+                'status' => $row->status,
+                'count' => (int) $row->total,
+                'last_at' => $row->getRawOriginal('last_at'),
+            ])
+            ->all();
+
+        $recent = EventLog::query()
+            ->where('publisher_plugin', $publisher)
+            ->where('created_at', '>=', $since)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get(['event_name', 'status', 'subscriber_count', 'created_at'])
+            ->map(fn ($row) => [
+                'event_name' => $row->event_name,
+                'status' => $row->status,
+                'subscriber_count' => (int) $row->subscriber_count,
+                'created_at' => $row->created_at?->toDateTimeString(),
+            ])
+            ->all();
+
+        return ['publisher' => $publisher, 'hours' => $hours, 'counts' => $counts, 'recent' => $recent];
+    }
+
+    /**
      * M4: Re-publish a failed event by EventLog ID. The publisher and event_name
      * are reused from the log entry; the original payload is replayed.
      *

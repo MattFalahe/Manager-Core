@@ -203,7 +203,7 @@ return [
                 'name' => 'Buyback Manager',
                 'class' => 'BuybackManager\BuybackManagerServiceProvider',
                 'package' => 'mattfalahe/buyback-manager',
-                'icon' => 'fa-shopping-cart',
+                'icon' => 'fa-exchange-alt',
                 'subscription_name' => 'buyback-manager',
             ],
             // Listed only where it is installed (PluginBridge::suitePlugins()):

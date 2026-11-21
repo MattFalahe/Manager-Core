@@ -14,7 +14,7 @@
             "appraisal.create", "appraisal.get",
             "bridge.discoverCapabilities", "bridge.registerSelf", "bridge.requireMinimumVersion",
             "esi.getRegisteredNotificationTypes", "esi.importKeyHolders", "esi.registerNotificationHandler",
-            "events.getSubscriptions", "events.publish", "events.subscribe",
+            "events.getRecentForPublisher", "events.getSubscriptions", "events.publish", "events.subscribe",
             "pricing.getMarketStats", "pricing.getPreferenceForPlugin", "pricing.getPrice", "pricing.getPrices",
             "pricing.getSubscribedTypeCount", "pricing.getTrend", "pricing.getVariantPrices", "pricing.listMarkets",
             "pricing.preferencesUrl", "pricing.priceForPlugin", "pricing.pricesForPlugin", "pricing.refreshIfOlder",

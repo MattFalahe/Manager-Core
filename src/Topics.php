@@ -397,12 +397,51 @@ class Topics
                 'description' => 'A member trailing-3-month Mining Manager tax compliance fell below the configured floor (default 50%). Recovers above the floor before the next drop publishes.',
             ],
 
-            // -------- Buyback Manager (for future use) --------
-            'buyback.completed' => [
+            // -------- Buyback Manager (contract lifecycle) --------
+            // Buyback Manager keeps the state that makes each of these fire
+            // once per contract; the key template only catches a repeat
+            // inside the idempotency window.
+            'buyback.contract.matched' => [
                 'publisher' => 'buyback-manager',
-                'required' => ['buyback_id'],
-                'idempotency_template' => 'buyback.completed:{buyback_id}',
-                'description' => 'A buyback request was completed.',
+                'required' => ['corporation_id', 'contract_id'],
+                'idempotency_template' => 'buyback.contract.matched:{contract_id}',
+                'description' => 'A contract quoting a valid appraisal key was found and matches its quote.',
+            ],
+            'buyback.contract.flagged' => [
+                'publisher' => 'buyback-manager',
+                'required' => ['corporation_id', 'contract_id'],
+                'idempotency_template' => 'buyback.contract.flagged:{contract_id}',
+                'description' => 'A contract quoting a valid appraisal key was found with review flags: price, stale quote, items, reused key or location.',
+            ],
+            'buyback.contract.unmatched' => [
+                'publisher' => 'buyback-manager',
+                'required' => ['corporation_id', 'contract_id'],
+                'idempotency_template' => 'buyback.contract.unmatched:{contract_id}',
+                'description' => 'A contract quoted an appraisal key that does not resolve for this corporation.',
+            ],
+            'buyback.contract.completed' => [
+                'publisher' => 'buyback-manager',
+                'required' => ['corporation_id', 'contract_id', 'issuer_id'],
+                'idempotency_template' => 'buyback.contract.completed:{contract_id}',
+                'description' => 'A tracked buyback contract was accepted and finished. HR Manager credits the seller from this.',
+            ],
+            'buyback.contract.cancelled' => [
+                'publisher' => 'buyback-manager',
+                'required' => ['corporation_id', 'contract_id'],
+                'idempotency_template' => 'buyback.contract.cancelled:{contract_id}',
+                'description' => 'A tracked buyback contract was cancelled, rejected, failed, deleted or reversed.',
+            ],
+            'buyback.contract.expired' => [
+                'publisher' => 'buyback-manager',
+                'required' => ['corporation_id', 'contract_id'],
+                'idempotency_template' => 'buyback.contract.expired:{contract_id}',
+                'description' => 'A tracked buyback contract passed its expiry date without being accepted.',
+            ],
+            'buyback.contract.nudge' => [
+                'publisher' => 'buyback-manager',
+                'required' => ['corporation_id', 'contract_id'],
+                'idempotency_template' => 'buyback.contract.nudge:{contract_id}',
+                'description' => 'A tracked buyback contract has waited past its corporation\'s reminder window.',
             ],
 
             // -------- HR Manager (player milestone signals) --------

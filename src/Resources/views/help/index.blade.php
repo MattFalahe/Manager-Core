@@ -749,7 +749,7 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         ],
                         'buyback-manager' => [
                             'url' => 'https://github.com/MattFalahe/Buyback-Manager',
-                            'text' => 'Corporation buyback programme: appraise, offer, contract.',
+                            'text' => 'Corporation buyback programme: appraise, contract, track.',
                             'here' => 'Prices its appraisals through Manager Core and publishes its buyback events.',
                             'unreleased' => true,
                         ],

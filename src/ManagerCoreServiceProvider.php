@@ -552,6 +552,17 @@ class ManagerCoreServiceProvider extends AbstractSeatPlugin
                 }
             });
 
+            $bridge->registerCapability('ManagerCore', 'events.getRecentForPublisher', function (string $publisher, int $hours = 24, int $limit = 20): array {
+                try {
+                    return app(\ManagerCore\Services\EventBus::class)
+                        ->getRecentForPublisher($publisher, $hours, $limit);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[Manager Core] events.getRecentForPublisher failed: ' . $e->getMessage());
+
+                    return ['publisher' => $publisher, 'hours' => $hours, 'counts' => [], 'recent' => []];
+                }
+            });
+
             // D7: Lets a consumer plugin import a batch of ESI key holders
             // without touching MC's schema directly. Used by Structure Manager's
             // historical key-pool migration. Idempotent — uses upsert semantics
