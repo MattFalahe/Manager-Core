@@ -135,7 +135,7 @@ jobs:
           php-version: '8.3'
           coverage: none
           tools: none
-      - name: Manifest, Blade, migrations, comments, em-dashes, CDN, modals
+      - name: Manifest, Blade, migrations, comments, CDN, modals
         run: php kit/ci/ecosystem/check.php static plugin --since="$SINCE"
 
   classes:

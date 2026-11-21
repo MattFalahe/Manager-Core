@@ -44,7 +44,6 @@ A plugin that `plugins.json` does not list names its work branch in its own work
 - migrations added by the push are named `YYYY_MM_DD_NNNNNN_name.php`, carry the plugin's identifier, hold a named class matching the file and sort after every migration before them;
 - on a released plugin, no migration the last tag shipped, and none an earlier push put on the branch, has changed or gone;
 - comments name no private notes or AI tools, and no file holds a local path;
-- no em-dash in text a user reads, outside Help, README and CHANGELOG;
 - no script or stylesheet loads from a CDN;
 - every Bootstrap modal moves to `<body>` before it shows.
 

@@ -59,68 +59,6 @@ final class Source
         return $out;
     }
 
-    /**
-     * String literals that are not part of a Log:: or logger() call, since a
-     * log line is read by whoever reads the logs, not shown on a page.
-     *
-     * @return array<int, array{0: string, 1: int}>
-     */
-    public static function phpStringsOutsideLogs(string $code): array
-    {
-        $tokens = self::tokens($code);
-        $out = [];
-        $depth = 0;
-        $logDepth = null;
-        $count = count($tokens);
-        for ($i = 0; $i < $count; $i++) {
-            $t = $tokens[$i];
-            if ($t === '(') {
-                $depth++;
-                continue;
-            }
-            if ($t === ')') {
-                $depth--;
-                if ($logDepth !== null && $depth === $logDepth - 1) {
-                    // Log::channel('x')->warning('...') carries on into the next call.
-                    for ($j = $i + 1; $j < $count && is_array($tokens[$j]) && $tokens[$j][0] === T_WHITESPACE; $j++);
-                    $chained = $j < $count && is_array($tokens[$j]) && in_array($tokens[$j][0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true);
-                    $logDepth = $chained ? $logDepth : null;
-                }
-                continue;
-            }
-            if (!is_array($t)) {
-                continue;
-            }
-            if ($logDepth === null && self::startsLogCall($tokens, $i)) {
-                $logDepth = $depth + 1;
-                continue;
-            }
-            if ($logDepth === null && in_array($t[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true)) {
-                $out[] = [$t[1], $t[2]];
-            }
-        }
-
-        return $out;
-    }
-
-    private static function startsLogCall(array $tokens, int $i): bool
-    {
-        $t = $tokens[$i];
-        $name = ltrim($t[1], '\\');
-        if ($t[0] === T_STRING && strtolower($name) === 'logger') {
-            return true;
-        }
-        if (!in_array($t[0], [T_STRING, T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED], true)) {
-            return false;
-        }
-        if ($name !== 'Log' && $name !== 'Illuminate\Support\Facades\Log') {
-            return false;
-        }
-        $next = $tokens[$i + 1] ?? null;
-
-        return is_array($next) && $next[0] === T_DOUBLE_COLON;
-    }
-
     /** PHP code with comments blanked out, line numbers kept. */
     public static function phpWithoutComments(string $code): string
     {

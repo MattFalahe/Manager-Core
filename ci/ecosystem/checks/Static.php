@@ -277,46 +277,6 @@ final class CommentCheck
     }
 }
 
-/**
- * No em-dash in text a user reads, outside Help, README and CHANGELOG:
- * views, scripts, styles and PHP strings, but not comments or log lines.
- */
-final class EmDashCheck
-{
-    public function run(Plugin $p, Report $r, array $o): void
-    {
-        $scanned = 0;
-        foreach ($p->files as $file) {
-            if (!preg_match('~^(src|resources)/~', $file) || preg_match('~(^|/)migrations/~i', $file) || Plugin::isHelp($file) || !preg_match('/\.(php|js|css)$/', $file) || preg_match('/\.min\.(js|css)$/', $file)) {
-                continue;
-            }
-            $scanned++;
-            $text = $p->read($file);
-            if (!str_contains($text, "\u{2014}")) {
-                continue;
-            }
-
-            $pieces = (str_ends_with($file, '.php') && !str_ends_with($file, '.blade.php'))
-                ? Source::phpStringsOutsideLogs($text)
-                : [[Source::withoutComments($file, $text), 1]];
-
-            foreach ($pieces as [$piece, $line]) {
-                $offset = 0;
-                // A lone dash standing in for an empty value is not prose; one that runs into words is.
-                while (preg_match('/\x{2014}[^\S\n]*[\p{L}\p{N}]/u', $piece, $hit, PREG_OFFSET_CAPTURE, $offset)) {
-                    $pos = $hit[0][1];
-                    $at = $line + substr_count($piece, "\n", 0, $pos);
-                    $start = max(0, strrpos(substr($piece, 0, $pos), "\n") ?: 0);
-                    $context = trim(substr($piece, $start, min(70, $pos - $start + 30)));
-                    $r->error('em-dashes', $file, $at, "Em-dash in user-facing text: '" . mb_strimwidth($context, 0, 70, '…') . "'.");
-                    $offset = $pos + 3;
-                }
-            }
-        }
-        $r->covered('em-dashes', "$scanned shipped files outside Help");
-    }
-}
-
 /** Third-party scripts and styles ship in the plugin, never from a CDN. */
 final class CdnCheck
 {

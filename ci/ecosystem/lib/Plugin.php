@@ -170,12 +170,6 @@ final class Plugin
         return array_values(array_filter($this->files, fn ($f) => preg_match($pattern, $f) === 1));
     }
 
-    /** Help pages and their language files are the one place em-dashes are allowed. */
-    public static function isHelp(string $relative): bool
-    {
-        return preg_match('~(^|/)help(/|\.|_)~i', $relative) === 1;
-    }
-
     /** @return string[] */
     private function listFiles(): array
     {

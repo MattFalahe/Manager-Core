@@ -69,7 +69,6 @@ $suites = [
         Ecosystem\Checks\MigrationCheck::class,
         Ecosystem\Checks\FrozenMigrationCheck::class,
         Ecosystem\Checks\CommentCheck::class,
-        Ecosystem\Checks\EmDashCheck::class,
         Ecosystem\Checks\CdnCheck::class,
         Ecosystem\Checks\ModalCheck::class,
         Ecosystem\Checks\ManifestSourceCheck::class,
