@@ -34,6 +34,8 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 - **`pricing.refreshIfOlder`** asks for newer prices between refreshes, through the market's provider or one it names, for a plugin Manager Core lets ask. It fetches only items the plugin subscribes to, and never more often than the provider allows: half an hour, an hour on Janice.
 - **`pricing.market_refreshed`** is published once a refresh has stored prices for a market.
 - **`pricing.unsubscribeTypes`** takes the items to drop as an optional third argument, and every side of a price names its `provider`.
+- **`events.getRecentForPublisher`** says what a plugin published lately, counted by topic and status, with the last few events and no payloads, for its own Diagnostics.
+- **Buyback Manager's contract topics are registered**: `buyback.contract.matched`, `flagged`, `unmatched`, `completed`, `cancelled`, `expired` and `nudge`. The `buyback.completed` placeholder is gone; nothing published it and nothing subscribed to it.
 
 ### 🧭 Plugin Bridge and Watchdog
 
