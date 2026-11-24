@@ -132,6 +132,11 @@ class Topics
             // in one calendar month (twice-monthly or weekly billing), and
             // `period` is that month, so a period key took the second for a
             // repeat. Mining Manager has sent tax_id since 2.0.0.
+            //
+            // A bill can be paid, reopened and paid again, so from Mining
+            // Manager 3.0.1 the paid, overdue, written-off and reopened events
+            // carry their own key, one per change. The templates below only
+            // apply to a publisher that leaves the key out.
             'mining.tax_created' => [
                 'publisher' => 'mining-manager',
                 'required' => ['tax_id', 'character_id', 'period'],
@@ -148,13 +153,19 @@ class Topics
                 'publisher' => 'mining-manager',
                 'required' => ['tax_id', 'character_id', 'period'],
                 'idempotency_template' => 'tax_overdue:{tax_id}',
-                'description' => 'A mining tax bill nothing was paid on passed its due date.',
+                'description' => 'A mining tax bill passed its due date with money still owed. part_paid says whether some of it was paid.',
             ],
             'mining.tax_written_off' => [
                 'publisher' => 'mining-manager',
                 'required' => ['tax_id', 'character_id', 'status'],
                 'idempotency_template' => 'tax_written_off:{tax_id}',
                 'description' => 'A director let a mining tax bill off (status waived or exempted). Nothing is left to pay on it.',
+            ],
+            'mining.tax_reopened' => [
+                'publisher' => 'mining-manager',
+                'required' => ['tax_id', 'character_id', 'status', 'previous_status'],
+                'idempotency_template' => 'tax_reopened:{tax_id}:{reopened_at}',
+                'description' => 'A mining tax bill that was paid or let off is open again: a director set it back, a payment on it was undone, or what it owes went up.',
             ],
             'mining.invoice_sent' => [
                 'publisher' => 'mining-manager',

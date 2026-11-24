@@ -36,6 +36,7 @@ All notable changes to Manager Core are documented here. Format follows [Keep a 
 - **`pricing.unsubscribeTypes`** takes the items to drop as an optional third argument, and every side of a price names its `provider`.
 - **`events.getRecentForPublisher`** says what a plugin published lately, counted by topic and status, with the last few events and no payloads, for its own Diagnostics.
 - **Buyback Manager's contract topics are registered**: `buyback.contract.matched`, `flagged`, `unmatched`, `completed`, `cancelled`, `expired` and `nudge`. The `buyback.completed` placeholder is gone; nothing published it and nothing subscribed to it.
+- **`mining.tax_reopened` is registered**, for a mining tax bill that was paid or let off and is open again. `mining.tax_overdue` now also covers a bill that was part paid, which its `part_paid` field says.
 
 ### 🧭 Plugin Bridge and Watchdog
 
