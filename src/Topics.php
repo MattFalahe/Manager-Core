@@ -297,6 +297,15 @@ class Topics
                 'idempotency_template' => 'alert.destroyed:{structure_id}',
                 'description' => 'Upwell structure was destroyed.',
             ],
+            // Follows destroyed once Structure Manager has looked the kill up
+            // on zKillboard, whether it found it or gave up. SM sends it once
+            // per destroyed structure.
+            'structure.alert.destroyed_confirmed' => [
+                'publisher' => 'structure-manager',
+                'required' => ['structure_id'],
+                'idempotency_template' => 'alert.destroyed_confirmed:{structure_id}',
+                'description' => 'A destroyed structure was checked against zKillboard. enrichment_outcome is enriched, with the killmail, final blow, top damage, attacker count and ISK value, or not_found_in_zkb. original_event_id is the structure.alert.destroyed event it follows.',
+            ],
             'structure.alert.fuel_critical' => [
                 'publisher' => 'structure-manager',
                 'required' => ['structure_id'],
@@ -354,6 +363,65 @@ class Topics
                 'required' => [],
                 'idempotency_template' => 'structure.doctrine.changed:{scope_type}:{scope_id}:{action}:{changed_at}',
                 'description' => 'A structure-fitting doctrine (or a compliance setting) changed in Structure Manager. Payload carries scope_type/scope_id, optional structure_type_id + security_band, action (created/updated/deleted/settings) and changed_at, which keeps a second change to the same scope from reading as a repeat. Consumers re-pull compliance via the structure-manager:compliance.getForCorporation capability.',
+            ],
+
+            // Structure Board timers: scheduled things (fuel running out, a
+            // reinforcement ending, an anchor finishing) rather than an
+            // attack happening now. Every event carries the whole timer, so
+            // a subscriber can build its row from any one of them. SeAT
+            // Broadcast puts them on its calendar; SM's own pre-timer
+            // reminders listen to the three upcoming_* stages.
+            //
+            // The upcoming_* and elapsed events fire once per timer, so the
+            // timer is the key. The rest can fire again for the same timer,
+            // so their key carries the event_id SM gives every event.
+            'structure_manager.timer.created' => [
+                'publisher' => 'structure-manager',
+                'required' => ['timer_id'],
+                'idempotency_template' => 'structure_manager.timer.created:{timer_id}:{event_id}',
+                'description' => 'A timer went up on the Structure Board, from a notification, a fuel reading or an operator. Also sent when a dismissed timer comes back.',
+            ],
+            'structure_manager.timer.updated' => [
+                'publisher' => 'structure-manager',
+                'required' => ['timer_id'],
+                'idempotency_template' => 'structure_manager.timer.updated:{timer_id}:{event_id}',
+                'description' => 'A Structure Board timer changed its severity, type or time. previous_severity, previous_event_type and previous_eve_time say what it was.',
+            ],
+            'structure_manager.timer.dismissed' => [
+                'publisher' => 'structure-manager',
+                'required' => ['timer_id'],
+                'idempotency_template' => 'structure_manager.timer.dismissed:{timer_id}:{event_id}',
+                'description' => 'A Structure Board timer was dismissed, by an operator or by Structure Manager (a refuelled structure clears its fuel timer). It is no longer a live concern.',
+            ],
+            'structure_manager.timer.upcoming_24h' => [
+                'publisher' => 'structure-manager',
+                'required' => ['timer_id'],
+                'idempotency_template' => 'structure_manager.timer.upcoming_24h:{timer_id}',
+                'description' => 'A Structure Board timer is 24 hours or less away. Sent once per timer.',
+            ],
+            'structure_manager.timer.upcoming_6h' => [
+                'publisher' => 'structure-manager',
+                'required' => ['timer_id'],
+                'idempotency_template' => 'structure_manager.timer.upcoming_6h:{timer_id}',
+                'description' => 'A Structure Board timer is 6 hours or less away. Sent once per timer.',
+            ],
+            'structure_manager.timer.upcoming_1h' => [
+                'publisher' => 'structure-manager',
+                'required' => ['timer_id'],
+                'idempotency_template' => 'structure_manager.timer.upcoming_1h:{timer_id}',
+                'description' => 'A Structure Board timer is an hour or less away. Sent once per timer.',
+            ],
+            'structure_manager.timer.elapsed' => [
+                'publisher' => 'structure-manager',
+                'required' => ['timer_id'],
+                'idempotency_template' => 'structure_manager.timer.elapsed:{timer_id}',
+                'description' => 'A Structure Board timer\'s time has passed. Sent once per timer. A timer that marks when a state began never sends it, and leaves through dismissed.',
+            ],
+            'structure_manager.timer.recovered' => [
+                'publisher' => 'structure-manager',
+                'required' => ['timer_id'],
+                'idempotency_template' => 'structure_manager.timer.recovered:{timer_id}:{event_id}',
+                'description' => 'Fuel is back to good on a structure Structure Manager had alerted on. Sent for its fuel timer just before the timer is dismissed. previous_severity says what the alert was.',
             ],
 
             // -------- Wallet (Corp Wallet Manager) --------
